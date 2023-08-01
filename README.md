@@ -6,7 +6,7 @@ The fAIthfuler is an AI-based project aimed at creating high-quality textures wi
 
 ## Notice
 
-This project is NOT a replacement for Faithful team texture packs. Thanks to them this project exists. If you're willing to generate the texture pack using this tool then you **MUST** use, share or modify it only for private purposes!
+This project is NOT a replacement for Faithful team texture packs. Thanks to them, this project exists. If you're willing to generate the texture pack using this tool, then you **MUST** use, share or modify it only for private purposes!
 
 ## Features
 
