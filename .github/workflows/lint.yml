@@ -1,0 +1,16 @@
+name: Lint check
+on: [push, pull_request]
+jobs:
+    Check:
+        name: Check
+        runs-on: ubuntu-latest
+        steps:
+            - name: Check out repository code
+              uses: actions/checkout@v3
+            - name: Lint
+              uses: gabriel-milan/action-pylint@v1
+              with:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  path: "./src/*.py"
+                  fail: true
+                  pr-message: false
