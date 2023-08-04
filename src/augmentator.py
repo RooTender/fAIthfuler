@@ -1,5 +1,6 @@
 """Provides augmentation techniques for images."""
 import os
+from multiprocessing import Pool
 from pathlib import Path
 from typing import Callable, List, Optional
 import shutil
@@ -61,31 +62,47 @@ class Techniques:
         img = ImageOps.flip(img)
         self._save_with_suffix(img, image_path, 'flipped')
 
+    def _jitterering(self, image_path: str, brightness, contrast, saturation, hue):
+        img = Image.open(image_path)
+
+        try:
+            red, green, blue, alpha = img.split()
+            jitter = transforms.ColorJitter(
+                brightness=brightness,
+                contrast=contrast,
+                saturation=saturation,
+                hue=hue)
+            red = jitter(red)
+            green = jitter(green)
+            blue = jitter(blue)
+            img = Image.merge(
+                'RGBA', (red, green, blue, alpha))
+
+            self._save_with_suffix(
+                img,
+                image_path,
+                f'jittered_b{brightness}_c{contrast}_s{saturation}_h{hue}')
+        except ValueError:
+            pass
+
     def color_jitter(self, image_path: str):
         """Apply color jittering to image."""
-        values = [0.1, 0.2, 0.3, 0.4, 0.5]
 
-        for brightness in values:
-            for contrast in values:
-                for saturation in values:
-                    for hue in values:
-                        img = Image.open(image_path)
+        values = [0.25, 0.5]
 
-                        red, green, blue, alpha = img.split()
-                        jitter = transforms.ColorJitter(
-                            brightness=brightness,
-                            contrast=contrast,
-                            saturation=saturation,
-                            hue=hue)
-                        red = jitter(red)
-                        green = jitter(green)
-                        blue = jitter(blue)
-                        img = Image.merge('RGBA', (red, green, blue, alpha))
+        with Pool() as pool:
+            jobs = []
+            for brightness in values:
+                for contrast in values:
+                    for saturation in values:
+                        for hue in values:
+                            jobs.append(pool.apply_async(
+                                self._jitterering,
+                                (image_path, brightness, contrast, saturation, hue)))
 
-                        self._save_with_suffix(
-                            img,
-                            image_path,
-                            f'jittered_b{brightness}_c{contrast}_s{saturation}_h{hue}')
+            # Wait for all jobs to complete
+            for job in jobs:
+                job.get()
 
 
 class Utils:
