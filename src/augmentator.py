@@ -4,9 +4,9 @@ from multiprocessing import Pool
 from pathlib import Path
 from typing import Callable, List, Optional
 import shutil
-from PIL import Image, ImageOps
+import numpy as np
+from PIL import Image, ImageOps, UnidentifiedImageError
 from tqdm import tqdm
-from torchvision import transforms
 
 
 class Techniques:
@@ -62,47 +62,29 @@ class Techniques:
         img = ImageOps.flip(img)
         self._save_with_suffix(img, image_path, 'flipped')
 
-    def _jitterering(self, image_path: str, brightness, contrast, saturation, hue):
+    def _jittering(self, image_path: str, value: float):
         img = Image.open(image_path)
+        img_array = np.array(img)
 
         try:
-            red, green, blue, alpha = img.split()
-            jitter = transforms.ColorJitter(
-                brightness=brightness,
-                contrast=contrast,
-                saturation=saturation,
-                hue=hue)
-            red = jitter(red)
-            green = jitter(green)
-            blue = jitter(blue)
-            img = Image.merge(
-                'RGBA', (red, green, blue, alpha))
-
+            rgb = img_array[..., :3]
+            rgb = np.clip(rgb * value, 0, 255).astype(np.uint8)
+            img_array[..., :3] = rgb
+            img = Image.fromarray(img_array)
             self._save_with_suffix(
                 img,
                 image_path,
-                f'jittered_b{brightness}_c{contrast}_s{saturation}_h{hue}')
+                f'jittered{value}')
         except ValueError:
             pass
+        except UnidentifiedImageError:
+            print(f"{image_path} is corrupted.")
 
     def color_jitter(self, image_path: str):
         """Apply color jittering to image."""
 
-        values = [0.25, 0.5]
-
-        with Pool() as pool:
-            jobs = []
-            for brightness in values:
-                for contrast in values:
-                    for saturation in values:
-                        for hue in values:
-                            jobs.append(pool.apply_async(
-                                self._jitterering,
-                                (image_path, brightness, contrast, saturation, hue)))
-
-            # Wait for all jobs to complete
-            for job in jobs:
-                job.get()
+        values = np.array([0.5, 0.6, 0.7, 0.8, 0.9, 1.1, 1.2, 1.3, 1.4, 1.5])
+        np.vectorize(self._jittering)(image_path, values)
 
 
 class Utils:
@@ -175,10 +157,11 @@ class Utils:
                 for (dirpath, _, filenames) in os.walk(self.output_directory):
                     files += [os.path.join(dirpath, file)
                               for file in filenames]
-            for file in tqdm(files, desc=function.__name__, unit="img"):
-                function(file)
         else:
-            for file in tqdm(to_files, desc=function.__name__, unit="img"):
-                function(file)
+            files = to_files
+
+        with Pool() as pool:
+            list(tqdm(pool.imap_unordered(function, files), total=len(
+                files), desc=function.__name__, unit="img"))
 
         return files
