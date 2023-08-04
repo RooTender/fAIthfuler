@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Callable, List, Optional
 import shutil
 import numpy as np
-from PIL import Image, ImageOps, UnidentifiedImageError
+from PIL import Image, ImageOps
 from tqdm import tqdm
 
 
@@ -59,61 +59,34 @@ class Techniques:
 
     def invert(self, image_path: str):
         """Invert colors of the image."""
-        img = Image.open(image_path)
-        try:
-            red, green, blue, alpha = img.split()
+        img = Image.open(image_path).convert('RGBA')
 
-            red = ImageOps.invert(red)
-            green = ImageOps.invert(green)
-            blue = ImageOps.invert(blue)
+        red, green, blue, alpha = img.split()
 
-            img = Image.merge("RGBA", (red, green, blue, alpha))
-            self._save_with_suffix(img, image_path, 'inverted')
-        except ValueError:
-            pass
+        red = ImageOps.invert(red)
+        green = ImageOps.invert(green)
+        blue = ImageOps.invert(blue)
 
-    def _change_hue(self, image_path: str, value: float):
-        img = Image.open(image_path)
-        hsv_image = np.array(img.convert('RGBA').convert('HSV'))
-        hsv_image[:, :, 0] = (hsv_image[:, :, 0] * value) % 360
-        img = Image.fromarray(hsv_image, 'HSV').convert('RGBA')
-        self._save_with_suffix(img, image_path, f'_hue{value}')
+        img = Image.merge('RGBA', (red, green, blue, alpha))
 
-    def _change_saturation(self, image_path: str, value: float):
-        img = Image.open(image_path)
-        hsv_image = np.array(img.convert('RGBA').convert('HSV'))
-        hsv_image[:, :, 1] = (hsv_image[:, :, 1] * value) % 100
-        img = Image.fromarray(hsv_image, 'HSV').convert('RGBA')
-        self._save_with_suffix(img, image_path, f'_saturation{value}')
-
-    def _change_value(self, image_path: str, value: float):
-        img = Image.open(image_path)
-        hsv_image = np.array(img.convert('RGBA').convert('HSV'))
-        hsv_image[:, :, 2] = (hsv_image[:, :, 2] * value) % 100
-        img = Image.fromarray(hsv_image, 'HSV').convert('RGBA')
-        self._save_with_suffix(img, image_path, f'_value{value}')
+        self._save_with_suffix(img, image_path, 'inverted')
 
     def _jittering(self, image_path: str, hue: float, saturation: float, value: float):
-        img = Image.open(image_path)
+        img = Image.open(image_path).convert('RGBA')
 
-        try:
-            alpha = img.getchannel('A')
-            hsv_image = np.array(img.convert('HSV'))
-            hsv_image[:, :, 0] = np.clip(hsv_image[:, :, 0] * hue, 0, 255)
-            hsv_image[:, :, 1] = np.clip(
-                hsv_image[:, :, 1] * saturation, 0, 255)
-            hsv_image[:, :, 2] = np.clip(hsv_image[:, :, 2] * value, 0, 255)
-            img = Image.fromarray(hsv_image, 'HSV').convert('RGBA')
-            img.putalpha(alpha)
+        alpha = img.getchannel('A')
+        hsv_image = np.array(img.convert('HSV'))
+        hsv_image[:, :, 0] = np.clip(hsv_image[:, :, 0] * hue, 0, 255)
+        hsv_image[:, :, 1] = np.clip(
+            hsv_image[:, :, 1] * saturation, 0, 255)
+        hsv_image[:, :, 2] = np.clip(hsv_image[:, :, 2] * value, 0, 255)
+        img = Image.fromarray(hsv_image, 'HSV').convert('RGBA')
+        img.putalpha(alpha)
 
-            self._save_with_suffix(
-                img,
-                image_path,
-                f'_hue{hue}_saturation{saturation}_value{value}')
-        except ValueError:
-            pass
-        except UnidentifiedImageError:
-            print(f"{image_path} is corrupted.")
+        self._save_with_suffix(
+            img,
+            image_path,
+            f'_hue{hue}_saturation{saturation}_value{value}')
 
     def color_jitter(self, image_path: str):
         """Apply color jittering to image."""
