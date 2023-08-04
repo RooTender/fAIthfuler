@@ -37,11 +37,6 @@ class Techniques:
         img.save(output)
         return output
 
-    def greyscale(self, image_path: str):
-        """Apply greyscale to image."""
-        img = Image.open(image_path).convert('LA').convert('RGBA')
-        self._save_with_suffix(img, image_path, 'greyscaled')
-
     def rotate(self, image_path: str):
         """Rotate the image by the specified angle (90, 180 and 270 degrees)."""
         degrees = [90, 180, 270]
@@ -62,19 +57,59 @@ class Techniques:
         img = ImageOps.flip(img)
         self._save_with_suffix(img, image_path, 'flipped')
 
-    def _jittering(self, image_path: str, value: float):
+    def invert(self, image_path: str):
+        """Invert colors of the image."""
         img = Image.open(image_path)
-        img_array = np.array(img)
+        try:
+            red, green, blue, alpha = img.split()
+
+            red = ImageOps.invert(red)
+            green = ImageOps.invert(green)
+            blue = ImageOps.invert(blue)
+
+            img = Image.merge("RGBA", (red, green, blue, alpha))
+            self._save_with_suffix(img, image_path, 'inverted')
+        except ValueError:
+            pass
+
+    def _change_hue(self, image_path: str, value: float):
+        img = Image.open(image_path)
+        hsv_image = np.array(img.convert('RGBA').convert('HSV'))
+        hsv_image[:, :, 0] = (hsv_image[:, :, 0] * value) % 360
+        img = Image.fromarray(hsv_image, 'HSV').convert('RGBA')
+        self._save_with_suffix(img, image_path, f'_hue{value}')
+
+    def _change_saturation(self, image_path: str, value: float):
+        img = Image.open(image_path)
+        hsv_image = np.array(img.convert('RGBA').convert('HSV'))
+        hsv_image[:, :, 1] = (hsv_image[:, :, 1] * value) % 100
+        img = Image.fromarray(hsv_image, 'HSV').convert('RGBA')
+        self._save_with_suffix(img, image_path, f'_saturation{value}')
+
+    def _change_value(self, image_path: str, value: float):
+        img = Image.open(image_path)
+        hsv_image = np.array(img.convert('RGBA').convert('HSV'))
+        hsv_image[:, :, 2] = (hsv_image[:, :, 2] * value) % 100
+        img = Image.fromarray(hsv_image, 'HSV').convert('RGBA')
+        self._save_with_suffix(img, image_path, f'_value{value}')
+
+    def _jittering(self, image_path: str, hue: float, saturation: float, value: float):
+        img = Image.open(image_path)
 
         try:
-            rgb = img_array[..., :3]
-            rgb = np.clip(rgb * value, 0, 255).astype(np.uint8)
-            img_array[..., :3] = rgb
-            img = Image.fromarray(img_array)
+            alpha = img.getchannel('A')
+            hsv_image = np.array(img.convert('HSV'))
+            hsv_image[:, :, 0] = np.clip(hsv_image[:, :, 0] * hue, 0, 255)
+            hsv_image[:, :, 1] = np.clip(
+                hsv_image[:, :, 1] * saturation, 0, 255)
+            hsv_image[:, :, 2] = np.clip(hsv_image[:, :, 2] * value, 0, 255)
+            img = Image.fromarray(hsv_image, 'HSV').convert('RGBA')
+            img.putalpha(alpha)
+
             self._save_with_suffix(
                 img,
                 image_path,
-                f'jittered{value}')
+                f'_hue{hue}_saturation{saturation}_value{value}')
         except ValueError:
             pass
         except UnidentifiedImageError:
@@ -83,8 +118,13 @@ class Techniques:
     def color_jitter(self, image_path: str):
         """Apply color jittering to image."""
 
-        values = np.array([0.5, 0.6, 0.7, 0.8, 0.9, 1.1, 1.2, 1.3, 1.4, 1.5])
-        np.vectorize(self._jittering)(image_path, values)
+        values = np.array([0.5, 0.75, 1.25, 1.5, 1.75, 2])
+
+        combinations = np.array(list(np.unique(np.array(np.meshgrid(
+            values, values, values)).T.reshape(-1, 3), axis=0)))
+        for combination in combinations:
+            np.vectorize(self._jittering)(
+                image_path, combination[0], combination[1], combination[2])
 
 
 class Utils:
