@@ -1,16 +1,19 @@
 """Provides augmentation techniques for images."""
 import os
 from pathlib import Path
-from typing import Callable, List
-from PIL import Image
+from typing import Callable
+import shutil
+from PIL import Image, ImageOps
+from tqdm import tqdm
 
 
-class Augmentator:
-    """Augments the raw data and outputs it to the desired folder"""
+class Techniques:
+    """Augmentation techniques that are applicable to this problem."""
 
     def __init__(self, input_dir, output_dir):
         self.input_directory = Path(input_dir)
         self.output_directory = Path(output_dir)
+        os.makedirs(os.path.dirname(output_dir), exist_ok=True)
 
     def _get_path_with_suffix(self, path: str, suffix: str):
         directory = os.path.dirname(path)
@@ -38,12 +41,44 @@ class Augmentator:
         self._save_with_suffix(img, image_path, 'greyscaled')
 
     def rotate(self, image_path):
-        """Rotate the texture by the specified angle (degrees)."""
+        """Rotate the image by the specified angle (90, 180 and 270 degrees)."""
         degrees = [90, 180, 270]
         for rotation in degrees:
             img = Image.open(image_path)
-            img = img.rotate(rotation, resample=Image.NEAREST)
+            img = img.rotate(rotation, resample=Image.NEAREST, expand=True)
             self._save_with_suffix(img, image_path, f'rotated_{rotation}')
+
+    def mirror(self, image_path):
+        """Mirror the image horizontally."""
+        img = Image.open(image_path)
+        img = ImageOps.mirror(img)
+        self._save_with_suffix(img, image_path, 'mirrored')
+
+    def flip(self, image_path):
+        """Flip the image vertically."""
+        img = Image.open(image_path)
+        img = ImageOps.flip(img)
+        self._save_with_suffix(img, image_path, 'flipped')
+
+
+class Utils:
+    """Utils for easier usage of augmentator."""
+
+    def __init__(self, input_dir, output_dir):
+        self.input_directory = Path(input_dir)
+        self.output_directory = Path(output_dir)
+        os.makedirs(self.output_directory, exist_ok=True)
+
+    def clone(self):
+        """Clones images from input to output directory."""
+        for (dirpath, _, filenames) in tqdm(
+                os.walk(self.input_directory), desc="clone", unit="dir"):
+            for filename in filenames:
+                output_dir = dirpath.replace(
+                    str(self.input_directory), str(self.output_directory))
+                os.makedirs(output_dir, exist_ok=True)
+                shutil.copy(os.path.join(dirpath, filename),
+                            os.path.join(output_dir, filename))
 
     def bulk_apply(self, function: Callable, use_processed_images=False):
         """Apply on bulk functions to the choosen input directory."""
@@ -55,5 +90,5 @@ class Augmentator:
             for (dirpath, _, filenames) in os.walk(self.output_directory):
                 files += [os.path.join(dirpath, file) for file in filenames]
 
-        for file in files:
+        for file in tqdm(files, desc=function.__name__, unit="img"):
             function(file)
