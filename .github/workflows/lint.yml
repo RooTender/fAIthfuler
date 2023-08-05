@@ -6,6 +6,8 @@ jobs:
         steps:
             - name: Check out repository code
               uses: actions/checkout@v3
+            - name: Install requirements
+              run: pip install -r requirements.txt
             - name: Lint
               uses: gabriel-milan/action-pylint@v1
               with:
