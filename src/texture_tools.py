@@ -1,28 +1,28 @@
 """Provides tools for handling .jar files."""
 import os
-import shutil
 import zipfile
+from pathlib import Path
 
 
 class ArchiveHandler:
     """Handles .jar files related to Minecraft."""
 
     def __init__(self):
-        self.aux_path = "ArchieveHandler_tmp"
+        self.data_path = os.path.join("..", "data")
+        self.output_path = os.path.join("..", "out")
 
     def extract_textures(self, file_path: str):
         """Extracts .jar file textures."""
-        output_path = os.path.join(
-            self.aux_path, os.path.basename(file_path[:len(file_path) - 4]))
+        output = os.path.join(self.data_path, "raw", Path(file_path).stem)
 
         with zipfile.ZipFile(file_path, 'r') as archive:
             for file in archive.infolist():
                 if file.filename.startswith('assets') and file.filename.endswith('.png'):
-                    archive.extract(file, output_path)
+                    archive.extract(file, output)
 
     def create_texture_pack(self, dir_path: str):
         """Creates texture pack based on output from the extract function."""
-        input_path = os.path.join(self.aux_path, dir_path)
+        input_path = os.path.join(self.output_path, dir_path)
 
         with zipfile.ZipFile(dir_path + ".zip", 'w') as zip_file:
             for foldername, _, filenames in os.walk(input_path):
@@ -31,7 +31,3 @@ class ArchiveHandler:
                     destination_path = source_file_path[
                         source_file_path.find("assets"):]
                     zip_file.write(source_file_path, destination_path)
-
-    def close(self):
-        """Cleans up the temporary folder."""
-        shutil.rmtree(self.aux_path)
