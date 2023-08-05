@@ -14,7 +14,7 @@ class ArchiveHandler:
     def extract_textures(self, file_path: str):
         """Extracts .jar file textures."""
         output = os.path.join(self.data_path, "raw", Path(file_path).stem)
-
+        os.makedirs(os.path.join('..', 'data', 'raw'), exist_ok=True)
         with zipfile.ZipFile(file_path, 'r') as archive:
             for file in archive.infolist():
                 if file.filename.startswith('assets') and file.filename.endswith('.png'):
