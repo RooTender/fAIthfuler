@@ -1,3 +1,12 @@
 {
-	"python.analysis.typeCheckingMode": "basic"
+	"python.analysis.typeCheckingMode": "basic",
+	"search.exclude": {
+		"**/data/augmented": true
+	},
+	"files.watcherExclude": {
+		"**/data/augmented": true
+	},
+	"python.analysis.exclude": [
+		"**/data/augmented"
+	]
 }
