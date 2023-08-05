@@ -42,7 +42,7 @@ class Techniques:
         degrees = [90, 180, 270]
         for rotation in degrees:
             img = Image.open(image_path)
-            img = img.rotate(rotation, resample=Image.NEAREST, expand=True)
+            img = img.rotate(rotation, resample=Image.Resampling.NEAREST, expand=True)
             self._save_with_suffix(img, image_path, f'rotated_{rotation}')
 
     def mirror(self, image_path: str):
