@@ -1,12 +1,18 @@
 {
 	"python.analysis.typeCheckingMode": "basic",
 	"search.exclude": {
-		"**/data/augmented": true
+		"**/data/augmented/*.png": true
 	},
 	"files.watcherExclude": {
 		"**/data/augmented": true
 	},
 	"python.analysis.exclude": [
 		"**/data/augmented"
-	]
+	],
+	"workbench.localHistory.exclude": {
+		"data/augmented": true
+	},
+	"files.exclude": {
+		"data/augmented/**": true
+	}
 }
