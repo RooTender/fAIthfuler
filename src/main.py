@@ -3,6 +3,7 @@ import os
 from multiprocessing import freeze_support
 from texture_tools import ArchiveHandler
 from augmentator import Utils, Techniques
+from cnn import CNN
 
 def unpack_textures():
     """Unpacks the archives placed in 'data/to_unpack' folder to 'data/raw' folder."""
@@ -13,11 +14,11 @@ def unpack_textures():
 
 def augment_datasets():
     """Does the augmentation of a raw datasets."""
-    input_dir = os.path.join("..", "data", "raw")
-    output_dir = os.path.join("..", "data", "augmented")
+    raw_files_path = os.path.join("..", "data", "raw")
+    augmented_files_path = os.path.join("..", "data", "augmented")
 
-    techniques = Techniques(input_dir, output_dir)
-    utils = Utils(input_dir, output_dir)
+    techniques = Techniques(raw_files_path, augmented_files_path)
+    utils = Utils(raw_files_path, augmented_files_path)
 
     utils.equalize_matching_data('original', 'x32')
     utils.clone()
@@ -32,3 +33,11 @@ def augment_datasets():
 if __name__ == '__main__':
     # add freeze support for multiprocessing
     freeze_support()
+
+    input_dir = os.path.join('..', 'data', 'augmented', 'original')
+    output_dir = os.path.join('..', 'data', 'augmented', 'x32')
+
+    augment_datasets()
+
+    # test = CNN()
+    # test.run(input_dir, output_dir)
