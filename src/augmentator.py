@@ -3,7 +3,6 @@ import os
 from multiprocessing import Pool, cpu_count
 from pathlib import Path
 from typing import Callable, List, Optional
-import shutil
 import numpy as np
 from PIL import Image, ImageOps
 from tqdm import tqdm
@@ -30,11 +29,11 @@ class Techniques:
             Path(f"{filename}_{suffix}.png")
         )
 
-    def _save_with_suffix(self, img, path: str, suffix: str):
+    def _save_with_suffix(self, img: Image.Image, path: str, suffix: str):
         """Saves image with suffix. Returns the path under which file is saved."""
         output = self._get_path_with_suffix(path, suffix)
         os.makedirs(os.path.dirname(output), exist_ok=True)
-        img.save(output)
+        img.convert('RGBA').save(output)
         return output
 
     def rotate(self, image_path: str):
@@ -42,7 +41,8 @@ class Techniques:
         degrees = [90, 180, 270]
         for rotation in degrees:
             img = Image.open(image_path)
-            img = img.rotate(rotation, resample=Image.Resampling.NEAREST, expand=True)
+            img = img.rotate(
+                rotation, resample=Image.Resampling.NEAREST, expand=True)
             self._save_with_suffix(img, image_path, f'rotated_{rotation}')
             img.close()
 
@@ -75,28 +75,27 @@ class Techniques:
         self._save_with_suffix(img, image_path, 'inverted')
         img.close()
 
-    def _jittering(self, image_path: str, hue: float, saturation: float, value: float):
+    def _jittering(self, image_path: str, hue: float, sat: float, val: float):
         img = Image.open(image_path)
 
         alpha = img.getchannel('A')
         hsv_image = np.array(img.convert('HSV'))
         hsv_image[:, :, 0] = np.clip(hsv_image[:, :, 0] * hue, 0, 255)
-        hsv_image[:, :, 1] = np.clip(
-            hsv_image[:, :, 1] * saturation, 0, 255)
-        hsv_image[:, :, 2] = np.clip(hsv_image[:, :, 2] * value, 0, 255)
+        hsv_image[:, :, 1] = np.clip(hsv_image[:, :, 1] * sat, 0, 255)
+        hsv_image[:, :, 2] = np.clip(hsv_image[:, :, 2] * val, 0, 255)
         img = Image.fromarray(hsv_image, 'HSV').convert('RGBA')
         img.putalpha(alpha)
 
         self._save_with_suffix(
             img,
             image_path,
-            f'_hue{hue}_saturation{saturation}_value{value}')
+            f'_hue{hue}_saturation{sat}_value{val}')
         img.close()
 
     def color_jitter(self, image_path: str):
         """Apply color jittering to image."""
 
-        values = np.array([0.5, 0.75, 1.25, 1.5, 2])
+        values = np.array([0.5, 1.5, 2])
 
         combinations = np.array(list(np.unique(np.array(np.meshgrid(
             values, values, values)).T.reshape(-1, 3), axis=0)))
@@ -150,14 +149,13 @@ class Utils:
             if os.path.isfile(file_path):
                 os.remove(file_path)
 
-    def clone(self, rgba_conversion: bool = True):
+    def clone(self):
         """Clones images from input to output directory."""
-        def convert_to_rgba(path: str):
+        def convert_to_rgba(image_path: str, output_path: str):
             """Converts files to RGBA channel."""
-            img = Image.open(path)
-            if img.mode != 'RGBA':
-                img.convert('RGBA')
-                img.save(path)
+            img = Image.open(image_path)
+            img = img.convert('RGBA')
+            img.save(output_path)
             img.close()
 
         for (dirpath, _, filenames) in tqdm(
@@ -166,10 +164,8 @@ class Utils:
                 output_dir = dirpath.replace(
                     str(self.input_directory), str(self.output_directory))
                 os.makedirs(output_dir, exist_ok=True)
-                output_path = os.path.join(output_dir, filename)
-                shutil.copy(os.path.join(dirpath, filename), output_path)
-                if rgba_conversion:
-                    convert_to_rgba(output_path)
+                convert_to_rgba(os.path.join(dirpath, filename),
+                                os.path.join(output_dir, filename))
 
     def _batch_process(self, args: tuple[Callable, List[str]]) -> None:
         """Helper function to apply the function to a batch of files."""
@@ -194,15 +190,17 @@ class Utils:
         else:
             files = to_files
 
-        batch_size = max(1, int(len(files) / (np.log(len(files)) * cpu_count())))
+        batch_size = min(1000, max(
+            1, int(len(files) / (np.log(len(files)) * cpu_count()))))
 
         # Split files into batches
-        file_batches = [files[i:i + batch_size] for i in range(0, len(files), batch_size)]
+        file_batches = [files[i:i + batch_size]
+                        for i in range(0, len(files), batch_size)]
 
         with Pool() as pool, tqdm(
-            total=len(file_batches),
-            desc=function.__name__,
-            unit="batch") as pbar:
+                total=len(file_batches),
+                desc=function.__name__,
+                unit="batch") as pbar:
             for _ in pool.imap_unordered(self._batch_process,
                                          [(function, file_batch) for file_batch in file_batches]):
                 pbar.update(1)
