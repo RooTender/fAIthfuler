@@ -1,6 +1,6 @@
 """Provides augmentation techniques for images."""
 import os
-from multiprocessing import Pool
+from multiprocessing import Pool, cpu_count
 from pathlib import Path
 from typing import Callable, List, Optional
 import shutil
@@ -44,22 +44,25 @@ class Techniques:
             img = Image.open(image_path)
             img = img.rotate(rotation, resample=Image.Resampling.NEAREST, expand=True)
             self._save_with_suffix(img, image_path, f'rotated_{rotation}')
+            img.close()
 
     def mirror(self, image_path: str):
         """Mirror the image horizontally."""
         img = Image.open(image_path)
         img = ImageOps.mirror(img)
         self._save_with_suffix(img, image_path, 'mirrored')
+        img.close()
 
     def flip(self, image_path: str):
         """Flip the image vertically."""
         img = Image.open(image_path)
         img = ImageOps.flip(img)
         self._save_with_suffix(img, image_path, 'flipped')
+        img.close()
 
     def invert(self, image_path: str):
         """Invert colors of the image."""
-        img = Image.open(image_path).convert('RGBA')
+        img = Image.open(image_path)
 
         red, green, blue, alpha = img.split()
 
@@ -70,9 +73,10 @@ class Techniques:
         img = Image.merge('RGBA', (red, green, blue, alpha))
 
         self._save_with_suffix(img, image_path, 'inverted')
+        img.close()
 
     def _jittering(self, image_path: str, hue: float, saturation: float, value: float):
-        img = Image.open(image_path).convert('RGBA')
+        img = Image.open(image_path)
 
         alpha = img.getchannel('A')
         hsv_image = np.array(img.convert('HSV'))
@@ -87,11 +91,12 @@ class Techniques:
             img,
             image_path,
             f'_hue{hue}_saturation{saturation}_value{value}')
+        img.close()
 
     def color_jitter(self, image_path: str):
         """Apply color jittering to image."""
 
-        values = np.array([0.5, 0.75, 1.25, 1.5, 1.75, 2])
+        values = np.array([0.5, 0.75, 1.25, 1.5, 2])
 
         combinations = np.array(list(np.unique(np.array(np.meshgrid(
             values, values, values)).T.reshape(-1, 3), axis=0)))
@@ -145,16 +150,32 @@ class Utils:
             if os.path.isfile(file_path):
                 os.remove(file_path)
 
-    def clone(self):
+    def clone(self, rgba_conversion: bool = True):
         """Clones images from input to output directory."""
+        def convert_to_rgba(path: str):
+            """Converts files to RGBA channel."""
+            img = Image.open(path)
+            if img.mode != 'RGBA':
+                img.convert('RGBA')
+                img.save(path)
+            img.close()
+
         for (dirpath, _, filenames) in tqdm(
                 os.walk(self.input_directory), desc="clone", unit="dir"):
             for filename in filenames:
                 output_dir = dirpath.replace(
                     str(self.input_directory), str(self.output_directory))
                 os.makedirs(output_dir, exist_ok=True)
-                shutil.copy(os.path.join(dirpath, filename),
-                            os.path.join(output_dir, filename))
+                output_path = os.path.join(output_dir, filename)
+                shutil.copy(os.path.join(dirpath, filename), output_path)
+                if rgba_conversion:
+                    convert_to_rgba(output_path)
+
+    def _batch_process(self, args: tuple[Callable, List[str]]) -> None:
+        """Helper function to apply the function to a batch of files."""
+        function, file_batch = args
+        for file in file_batch:
+            function(file)
 
     def bulk_apply(self, function: Callable,
                    to_files: Optional[List[str]] = None, use_processed_images=False):
@@ -173,8 +194,17 @@ class Utils:
         else:
             files = to_files
 
-        with Pool() as pool:
-            list(tqdm(pool.imap_unordered(function, files), total=len(
-                files), desc=function.__name__, unit="img"))
+        batch_size = max(1, int(len(files) / (np.log(len(files)) * cpu_count())))
+
+        # Split files into batches
+        file_batches = [files[i:i + batch_size] for i in range(0, len(files), batch_size)]
+
+        with Pool() as pool, tqdm(
+            total=len(file_batches),
+            desc=function.__name__,
+            unit="batch") as pbar:
+            for _ in pool.imap_unordered(self._batch_process,
+                                         [(function, file_batch) for file_batch in file_batches]):
+                pbar.update(1)
 
         return files
