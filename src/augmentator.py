@@ -302,6 +302,35 @@ class Utils:
 
     def prepare_data(self, output_scale_ratio: int):
 
+        print('preprocessing...')
+        for directory in os.listdir(self.input_directory):
+            self.preprocess_data(os.path.join(
+                self.input_directory, os.path.basename(os.path.normpath(directory))))
+
+        def get_style_directories_for_category(category: str):
+            styles_directories = os.path.join(
+                self.output_directory,
+                category
+            )
+            styles_directories = os.listdir(styles_directories)
+            styles_directories.remove("original")
+            return list(map(lambda x: os.path.join(
+                self.output_directory,
+                category,
+                x
+            ), styles_directories))
+
+        print('normalizing...')
+        directories = get_style_directories_for_category('preprocessed')
+        for directory in directories:
+            self.normalize_data(
+                os.path.join(self.output_directory,
+                             'preprocessed', 'original'),
+                os.path.join(self.output_directory, 'preprocessed', os.path.basename(
+                    os.path.normpath(directory))),
+                output_scale_ratio
+            )
+
         print('postprocessing...')
         for directory in os.listdir(os.path.join(self.output_directory, 'normalized')):
             self.postprocess_data(os.path.join(
