@@ -113,79 +113,24 @@ class Utils:
         self.output_directory = Path(output_dir)
         os.makedirs(self.output_directory, exist_ok=True)
 
-    def equalize_matching_data(self, raw_input_relpath: str, raw_output_relpath: str):
-        """Erases all the files that unmatch the output data"""
-        input_files = []
-        for root, _, files in os.walk(os.path.join(self.input_directory, raw_input_relpath)):
-            for file in files:
-                path = os.path.join(root, file)
-                path = path.replace(os.path.join(
-                    self.input_directory, raw_input_relpath), "")[1:]
-                input_files.append(path)
-
-        output_files = []
-        for root, _, files in os.walk(os.path.join(self.input_directory, raw_output_relpath)):
-            for file in files:
-                path = os.path.join(root, file)
-                path = path.replace(os.path.join(
-                    self.input_directory, raw_output_relpath), "")[1:]
-                output_files.append(path)
-
-        unmatched_input_files = list(set(input_files) - set(output_files))
-        unmatched_output_files = list(set(output_files) - set(input_files))
-
-        for i, file in enumerate(unmatched_input_files):
-            unmatched_input_files[i] = os.path.join(
-                self.input_directory, raw_input_relpath, file)
-
-        for i, file in enumerate(unmatched_output_files):
-            unmatched_output_files[i] = os.path.join(
-                self.input_directory, raw_output_relpath, file)
-
-        for file_path in unmatched_input_files:
-            if os.path.isfile(file_path):
-                os.remove(file_path)
-
-        for file_path in unmatched_output_files:
-            if os.path.isfile(file_path):
-                os.remove(file_path)
-
-    def clone(self):
-        """Clones images from input to output directory."""
-        def convert_to_rgba(image_path: str, output_path: str):
-            """Converts files to RGBA channel."""
-            img = Image.open(image_path)
-            img = img.convert('RGBA')
-            img.save(output_path)
-            img.close()
-
-        for (dirpath, _, filenames) in tqdm(
-                os.walk(self.input_directory), desc="clone", unit="dir"):
-            for filename in filenames:
-                output_dir = dirpath.replace(
-                    str(self.input_directory), str(self.output_directory))
-                os.makedirs(output_dir, exist_ok=True)
-                convert_to_rgba(os.path.join(dirpath, filename),
-                                os.path.join(output_dir, filename))
-
     def _batch_process(self, args: tuple[Callable, List[str]]) -> None:
         """Helper function to apply the function to a batch of files."""
         function, file_batch = args
         for file in file_batch:
             function(file)
 
-    def bulk_apply(self, function: Callable,
-                   to_files: Optional[List[str]] = None, use_processed_images=False):
+    def augment_data(self, techniques_instance: Techniques, function: Callable,
+                     to_files: Optional[List[str]] = None, use_processed_images=False):
         """Apply on bulk functions to the choosen input directory."""
         files = []
 
         if to_files is None:
             if use_processed_images is False:
-                for (dirpath, _, filenames) in os.walk(self.input_directory):
+                for (dirpath, _, filenames) in os.walk(techniques_instance.input_directory):
                     files += [os.path.join(dirpath, file)
                               for file in filenames]
             else:
-                for (dirpath, _, filenames) in os.walk(self.output_directory):
+                for (dirpath, _, filenames) in os.walk(techniques_instance.output_directory):
                     files += [os.path.join(dirpath, file)
                               for file in filenames]
         else:
@@ -335,3 +280,11 @@ class Utils:
         for directory in os.listdir(os.path.join(self.output_directory, 'normalized')):
             self.postprocess_data(os.path.join(
                 self.output_directory, 'normalized', os.path.basename(os.path.normpath(directory))))
+
+        print('prepare for augmentation...')
+        final_directory = os.path.join(self.output_directory, 'augmented')
+        if os.path.exists(final_directory):
+            shutil.rmtree(final_directory)
+
+        shutil.copytree(os.path.join(self.output_directory,
+                        'postprocessed'), final_directory)
