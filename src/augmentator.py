@@ -279,28 +279,30 @@ class Utils:
                 shutil.copy(os.path.join(output_dir, file),
                             os.path.join(output_dir_for_output, file))
 
-    def prepare_data(self, output_scale_ratio: int):
-        # for directory in os.listdir(self.input_directory):
-        #    self.preprocess_data(os.path.join(
-        #        self.input_directory, os.path.basename(os.path.normpath(directory))))
+    def postprocess_data(self, input_dir: str):
 
-        styles_directories = os.path.join(
-            self.output_directory,
-            'preprocessed'
-        )
-        styles_directories = os.listdir(styles_directories)
-        styles_directories.remove("original")
-        styles_directories = list(map(lambda x: os.path.join(
-            self.output_directory,
-            'preprocessed',
-            x
-        ), styles_directories))
+        for dirpath, _, filenames in os.walk(input_dir):
 
-        for directory in styles_directories:
-            self.normalize_data(
-                os.path.join(self.output_directory,
-                             'preprocessed', 'original'),
-                os.path.join(self.output_directory, 'preprocessed', os.path.basename(
-                    os.path.normpath(directory))),
-                output_scale_ratio
+            if dirpath is input_dir:
+                continue
+
+            if len(os.listdir(dirpath)) < 10:
+                continue
+
+            output_dir = os.path.join(
+                self.output_directory,
+                'postprocessed',
+                os.path.basename(input_dir),
+                os.path.basename(dirpath)
             )
+            os.makedirs(output_dir, exist_ok=True)
+            for file in filenames:
+                shutil.copy(os.path.join(dirpath, file),
+                            os.path.join(output_dir, file))
+
+    def prepare_data(self, output_scale_ratio: int):
+
+        print('postprocessing...')
+        for directory in os.listdir(os.path.join(self.output_directory, 'normalized')):
+            self.postprocess_data(os.path.join(
+                self.output_directory, 'normalized', os.path.basename(os.path.normpath(directory))))
