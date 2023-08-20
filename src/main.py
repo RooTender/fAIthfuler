@@ -22,7 +22,7 @@ def augment_datasets(output_scale_ratio: int):
         os.path.join("..", "data", "output", "postprocessed"),
         os.path.join("..", "data", "output", "augmented"))
 
-    # utils.prepare_data(output_scale_ratio)
+    utils.prepare_data(output_scale_ratio)
     utils.augment_data(techniques, techniques.flip)
     utils.augment_data(techniques, techniques.mirror)
     utils.augment_data(techniques, techniques.rotate)
