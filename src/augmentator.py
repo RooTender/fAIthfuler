@@ -3,6 +3,7 @@ import os
 from multiprocessing import Pool, cpu_count
 from pathlib import Path
 from typing import Callable, List, Optional
+import shutil
 import numpy as np
 from PIL import Image, ImageOps
 from tqdm import tqdm
@@ -206,3 +207,100 @@ class Utils:
                 pbar.update(1)
 
         return files
+
+    def preprocess_data(self, input_dir: str):
+        for root, _, files in tqdm(os.walk(input_dir), desc=f"sort ({os.path.basename(os.path.normpath(input_dir))})", unit="dir"):
+            for file in files:
+                file_path = os.path.join(root, file)
+                with Image.open(file_path) as img:
+                    dim = img.size
+
+                    if dim[1] > dim[0]:
+                        dim = (dim[1], dim[0])
+                    img = Image.open(file_path)
+                    img = img.convert('RGBA')
+
+                    output_dir = os.path.join(
+                        self.output_directory,
+                        'preprocessed',
+                        os.path.basename(os.path.normpath(input_dir)),
+                        f'{dim[0]}x{dim[1]}')
+                    os.makedirs(output_dir, exist_ok=True)
+                    img.save(os.path.join(output_dir, file))
+
+    def normalize_data(self, input_dir: str, output_dir: str, output_scale_ratio: int):
+
+        def collect_files_info(directory: str):
+            result = []
+            for root, _, files in os.walk(directory):
+                for file in files:
+                    path = os.path.join(root, file)
+                    path = path.replace(directory, "")[1:]
+                    result.append(path)
+            return result
+
+        input_files = collect_files_info(input_dir)
+        output_files = collect_files_info(output_dir)
+
+        def scaled_filename(file: str, scale: int):
+            dimensions, rest = os.path.split(file)
+            width, height = map(int, dimensions.split('x'))
+            new_dimensions = f"{width * scale}x{height * scale}"
+            return os.path.join(new_dimensions, rest)
+
+        aux_input_files = list(
+            map(lambda x: scaled_filename(x, output_scale_ratio), input_files))
+
+        # Find common files
+        common_filenames = list(set(aux_input_files) & set(output_files))
+
+        output_dir_for_input = os.path.join(
+            self.output_directory,
+            'normalized',
+            os.path.basename(os.path.normpath(input_dir)))
+
+        for file in input_files:
+            scaled_file = scaled_filename(file, output_scale_ratio)
+            if scaled_file in common_filenames:
+                os.makedirs(os.path.join(output_dir_for_input,
+                            os.path.dirname(file)), exist_ok=True)
+                shutil.copy(os.path.join(input_dir, file),
+                            os.path.join(output_dir_for_input, file))
+
+        output_dir_for_output = os.path.join(
+            self.output_directory,
+            'normalized',
+            os.path.basename(os.path.normpath(output_dir)))
+
+        for file in output_files:
+            if file in common_filenames:
+                os.makedirs(os.path.join(output_dir_for_output,
+                            os.path.dirname(file)), exist_ok=True)
+                shutil.copy(os.path.join(output_dir, file),
+                            os.path.join(output_dir_for_output, file))
+
+    def prepare_data(self, output_scale_ratio: int):
+        # for directory in os.listdir(self.input_directory):
+        #    self.preprocess_data(os.path.join(
+        #        self.input_directory, os.path.basename(os.path.normpath(directory))))
+
+        styles_directories = os.path.join(
+            self.output_directory,
+            'preprocessed'
+        )
+        styles_directories = os.listdir(styles_directories)
+        styles_directories.remove("original")
+        styles_directories = list(map(lambda x: os.path.join(
+            self.output_directory,
+            'preprocessed',
+            x
+        ), styles_directories))
+
+        for directory in styles_directories:
+            self.normalize_data(
+                os.path.join(self.output_directory,
+                             'preprocessed', 'original'),
+                os.path.join(self.output_directory, 'preprocessed', os.path.basename(
+                    os.path.normpath(directory))),
+                output_scale_ratio
+            )
