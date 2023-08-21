@@ -36,7 +36,9 @@ if __name__ == '__main__':
     # add freeze support for multiprocessing
     freeze_support()
 
-    augment_datasets(2)
+    # augment_datasets(2)
 
-# test = CNN()
-# test.run(input_dir, output_dir)
+    test = CNN()
+    test.run(
+        os.path.join("..", "data", "output", "augmented", "original", "8x8"),
+        os.path.join("..", "data", "output", "augmented", "x32", "16x16"))
