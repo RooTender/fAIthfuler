@@ -180,9 +180,13 @@ class CNN:
         # SGD performs the best on 0.3
         # Adam on 0.001
         learning_rate = 0.3
-        batch_size = 32
+
+        # SGD on 32
+        # Adam on ???
+        batch_size = 16
         epochs = 10
         patience = epochs
+        optimizer = 'sgd'
 
         # start a new wandb run to track this script
         wandb.init(
@@ -195,7 +199,8 @@ class CNN:
                 "architecture": "CNN",
                 "learning_rate": learning_rate,
                 "batch_size": batch_size,
-                "hidden_layer_sizes": [64, 32, 4]
+                "hidden_layer_sizes": [256, 128, 64, 4],
+                "optimizer": optimizer
             }
         )
 
@@ -215,7 +220,7 @@ class CNN:
         self.__train(f'{directory_for_saving_models}_b{batch_size}_lr{learning_rate}',
                      original_data, style_data,
                      epochs, learning_rate, patience,
-                     optimizer_type='sgd',
+                     optimizer_type=optimizer,
                      fine_tune_model=fine_tune_model)
 
         wandb.finish()
