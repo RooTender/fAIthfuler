@@ -19,11 +19,17 @@ class FaithfulNet(nn.Module):
         # Upscaling layers (for example, using Transposed Convolution)
         self.upscale = nn.Sequential(
             nn.ConvTranspose2d(4, 256, kernel_size=4, stride=2, padding=1),
-            nn.ReLU(),
+            nn.BatchNorm2d(256),
+            nn.LeakyReLU(0.01, inplace=True),
+
             nn.Conv2d(256, 128, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
+            nn.BatchNorm2d(128),
+            nn.LeakyReLU(0.01, inplace=True),
+
             nn.Conv2d(128, 64, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
+            nn.BatchNorm2d(64),
+            nn.LeakyReLU(0.01, inplace=True),
+
             nn.Conv2d(64, 4, kernel_size=3, stride=1, padding=1),
             nn.Tanh()
         )
@@ -56,12 +62,6 @@ class ImageLoaderDataset(Dataset):
 class CNN:
     """Trains neural networks and evaluates them."""
 
-    def calculate_psnr(self, predictions, targets):
-        """Calculate peak signal-to-noise ratio."""
-        mse = torch.mean((predictions - targets) ** 2)
-        psnr = 20 * torch.log10(1.0 / torch.sqrt(mse))
-        return psnr
-
     def __load_data(self, input_path: str, output_path: str, batch_size: int):
         print(f'Input dataset: {input_path}')
         print(f'Output dataset: {output_path}')
@@ -82,9 +82,16 @@ class CNN:
 
     def __train(self, dir_for_models: str, input_data: DataLoader, output_data: DataLoader,
                 num_of_epochs: int, learning_rate: float, early_stopping_patience: int,
+                optimizer_type: str = 'adam',
                 fine_tune_model: str = ''):
         model = FaithfulNet().cuda()
-        optimizer = optim.SGD(model.parameters(), lr=learning_rate)
+
+        if optimizer_type == 'adam':
+            optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+        elif optimizer_type == 'sgd':
+            optimizer = optim.SGD(model.parameters(), lr=learning_rate)
+        else:
+            raise ValueError("Unsupported optimizer type:", optimizer_type)
 
         criterion_mse = nn.MSELoss()
 
@@ -136,6 +143,8 @@ class CNN:
 
                 # Step
                 loss.backward()
+                nn.utils.clip_grad.clip_grad_norm_(
+                    model.parameters(), max_norm=1.0)
                 optimizer.step()
 
             avg_psnr = total_psnr / total_batches
@@ -168,9 +177,11 @@ class CNN:
             fine_tune_model: str = ''):
         """Just a test..."""
 
+        # SGD performs the best on 0.3
+        # Adam on 0.001
         learning_rate = 0.3
         batch_size = 32
-        epochs = 100
+        epochs = 10
         patience = epochs
 
         # start a new wandb run to track this script
@@ -204,6 +215,7 @@ class CNN:
         self.__train(f'{directory_for_saving_models}_b{batch_size}_lr{learning_rate}',
                      original_data, style_data,
                      epochs, learning_rate, patience,
-                     fine_tune_model)
+                     optimizer_type='sgd',
+                     fine_tune_model=fine_tune_model)
 
         wandb.finish()
