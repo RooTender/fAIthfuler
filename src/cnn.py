@@ -94,6 +94,7 @@ class CNN:
             raise ValueError("Unsupported optimizer type:", optimizer_type)
 
         criterion_mse = nn.MSELoss()
+        criterion_ssim = piq.SSIMLoss()
 
         if fine_tune_model != '':
             checkpoint = torch.load(fine_tune_model)
@@ -112,6 +113,7 @@ class CNN:
         for epoch in range(start_epoch, start_epoch + num_of_epochs):
             total_psnr = 0.0
             total_ssim = 0.0
+            total_mse = 0.0
 
             total_loss = 0.0
             total_batches = 0
@@ -127,19 +129,23 @@ class CNN:
                 optimizer.zero_grad()
                 prediction = model(input_batch)
 
-                # Metrics
+                # Loss
                 # Rescale from [-1, 1] to [0, 1]
                 prediction = (prediction + 1) / 2.0
                 output_batch = (output_batch + 1) / 2.0
 
-                total_psnr += piq.psnr(prediction, output_batch).item()
-                total_ssim += piq.ssim(
-                    prediction, output_batch).item()  # type: ignore
-
-                loss = criterion_mse(prediction, output_batch)
+                mse_loss = criterion_mse(prediction, output_batch)
+                ssim_loss = criterion_ssim(prediction, output_batch)
+                loss = 0.8 * mse_loss + 0.2 * ssim_loss
 
                 total_loss += loss.item()
                 total_batches += 1
+
+                # Metrics
+                total_mse += mse_loss.item()
+                total_psnr += piq.psnr(prediction, output_batch).item()
+                total_ssim += piq.ssim(
+                    prediction, output_batch).item()  # type: ignore
 
                 # Step
                 loss.backward()
@@ -147,11 +153,13 @@ class CNN:
                     model.parameters(), max_norm=1.0)
                 optimizer.step()
 
+            avg_mse = total_mse / total_batches
             avg_psnr = total_psnr / total_batches
             avg_ssim = total_ssim / total_batches
             avg_loss = total_loss / total_batches
 
             wandb.log({
+                "mse": avg_mse,
                 "psnr": avg_psnr,
                 "ssim": avg_ssim,
                 "loss": avg_loss})
