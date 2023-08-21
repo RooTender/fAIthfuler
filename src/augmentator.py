@@ -154,7 +154,10 @@ class Utils:
         return files
 
     def preprocess_data(self, input_dir: str):
-        for root, _, files in tqdm(os.walk(input_dir), desc=f"sort ({os.path.basename(os.path.normpath(input_dir))})", unit="dir"):
+        for root, _, files in tqdm(
+                os.walk(input_dir),
+                desc=f"sort ({os.path.basename(os.path.normpath(input_dir))})",
+                unit="dir"):
             for file in files:
                 file_path = os.path.join(root, file)
                 with Image.open(file_path) as img:

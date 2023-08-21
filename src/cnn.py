@@ -81,15 +81,28 @@ class CNN:
             output_data, batch_size=batch_size, pin_memory=True)
 
     def __train(self, dir_for_models: str, input_data: DataLoader, output_data: DataLoader,
-                num_of_epochs: int, learning_rate: float):
+                num_of_epochs: int, learning_rate: float, early_stopping_patience: int,
+                fine_tune_model: str = ''):
         model = FaithfulNet().cuda()
         optimizer = optim.SGD(model.parameters(), lr=learning_rate)
 
         criterion_mse = nn.MSELoss()
 
-        best_loss = float('inf')
+        if fine_tune_model != '':
+            checkpoint = torch.load(fine_tune_model)
 
-        for epoch in range(num_of_epochs):
+            model.load_state_dict(checkpoint['model_state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            start_epoch = checkpoint['epoch']
+            best_loss = checkpoint['loss']
+
+        else:
+            start_epoch = 0
+            best_loss = float('inf')
+
+        no_improvement_count = 0
+
+        for epoch in range(start_epoch, start_epoch + num_of_epochs):
             total_psnr = 0.0
             total_ssim = 0.0
 
@@ -137,18 +150,28 @@ class CNN:
             if avg_loss < best_loss:
                 best_loss = avg_loss
                 best_model_state = model.state_dict()
+                no_improvement_count = 0
 
                 os.makedirs(os.path.join(
                     '..', 'models', dir_for_models), exist_ok=True)
                 torch.save(best_model_state, os.path.join(
                     '..', 'models', dir_for_models, f'e{epoch}_l{avg_loss:.4f}.pth'))
+            else:
+                no_improvement_count += 1
+                if no_improvement_count >= early_stopping_patience:
+                    print("Early stopping: No improvement for",
+                          early_stopping_patience, "epochs.")
+                    break
 
-    def run(self, directory_for_saving_models: str, input_path: str, output_path: str):
+    def run(self, directory_for_saving_models: str,
+            input_path: str, output_path: str,
+            fine_tune_model: str = ''):
         """Just a test..."""
 
-        learning_rate = 0.35
-        batch_size = 64
-        epochs = 1000
+        learning_rate = 0.3
+        batch_size = 32
+        epochs = 100
+        patience = epochs
 
         # start a new wandb run to track this script
         wandb.init(
@@ -158,8 +181,8 @@ class CNN:
             name="FaithfulNet",
             # track hyperparameters and run metadata
             config={
-                "learning_rate": learning_rate,
                 "architecture": "CNN",
+                "learning_rate": learning_rate,
                 "batch_size": batch_size,
                 "hidden_layer_sizes": [64, 32, 4]
             }
@@ -178,7 +201,9 @@ class CNN:
         )
 
         # simulate training
-        self.__train(directory_for_saving_models, original_data,
-                     style_data, epochs, learning_rate)
+        self.__train(f'{directory_for_saving_models}_b{batch_size}_lr{learning_rate}',
+                     original_data, style_data,
+                     epochs, learning_rate, patience,
+                     fine_tune_model)
 
         wandb.finish()
