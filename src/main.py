@@ -40,5 +40,6 @@ if __name__ == '__main__':
 
     test = CNN()
     test.run(
+        '8x8',
         os.path.join("..", "data", "output", "augmented", "original", "8x8"),
         os.path.join("..", "data", "output", "augmented", "x32", "16x16"))

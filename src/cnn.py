@@ -4,9 +4,8 @@ import sys
 import torch
 from torch import nn, optim
 from torch.utils.data import Dataset, DataLoader
-from torchvision import datasets, transforms
+from torchvision import transforms
 import piq
-import numpy as np
 from PIL import Image
 from tqdm import tqdm
 import wandb
@@ -81,14 +80,19 @@ class CNN:
         return DataLoader(input_data, batch_size=batch_size, pin_memory=True), DataLoader(
             output_data, batch_size=batch_size, pin_memory=True)
 
-    def __train(self, input_data: DataLoader, output_data: DataLoader,
+    def __train(self, dir_for_models: str, input_data: DataLoader, output_data: DataLoader,
                 num_of_epochs: int, learning_rate: float):
         model = FaithfulNet().cuda()
         optimizer = optim.SGD(model.parameters(), lr=learning_rate)
-        criterion = nn.MSELoss()
+
+        criterion_mse = nn.MSELoss()
+
+        best_loss = float('inf')
 
         for epoch in range(num_of_epochs):
             total_psnr = 0.0
+            total_ssim = 0.0
+
             total_loss = 0.0
             total_batches = 0
 
@@ -108,28 +112,43 @@ class CNN:
                 prediction = (prediction + 1) / 2.0
                 output_batch = (output_batch + 1) / 2.0
 
-                loss = criterion(prediction, output_batch)
+                total_psnr += piq.psnr(prediction, output_batch).item()
+                total_ssim += piq.ssim(
+                    prediction, output_batch).item()  # type: ignore
+
+                loss = criterion_mse(prediction, output_batch)
+
                 total_loss += loss.item()
-
-                psnr = piq.psnr(prediction, output_batch)
-                total_psnr += psnr.mean().item()
-
                 total_batches += 1
 
                 # Step
                 loss.backward()
                 optimizer.step()
 
-            wandb.log({
-                "psnr": total_psnr / total_batches,
-                "loss": total_loss / total_batches})
+            avg_psnr = total_psnr / total_batches
+            avg_ssim = total_ssim / total_batches
+            avg_loss = total_loss / total_batches
 
-    def run(self, input_path: str, output_path: str):
+            wandb.log({
+                "psnr": avg_psnr,
+                "ssim": avg_ssim,
+                "loss": avg_loss})
+
+            if avg_loss < best_loss:
+                best_loss = avg_loss
+                best_model_state = model.state_dict()
+
+                os.makedirs(os.path.join(
+                    '..', 'models', dir_for_models), exist_ok=True)
+                torch.save(best_model_state, os.path.join(
+                    '..', 'models', dir_for_models, f'e{epoch}_l{avg_loss:.4f}.pth'))
+
+    def run(self, directory_for_saving_models: str, input_path: str, output_path: str):
         """Just a test..."""
 
-        learning_rate = 0.65
+        learning_rate = 0.35
         batch_size = 64
-        epochs = 10
+        epochs = 1000
 
         # start a new wandb run to track this script
         wandb.init(
@@ -159,6 +178,7 @@ class CNN:
         )
 
         # simulate training
-        self.__train(original_data, style_data, epochs, learning_rate)
+        self.__train(directory_for_saving_models, original_data,
+                     style_data, epochs, learning_rate)
 
         wandb.finish()
