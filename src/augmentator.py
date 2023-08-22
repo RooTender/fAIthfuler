@@ -2,7 +2,7 @@
 import os
 from multiprocessing import Pool, cpu_count
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import Callable, List
 import shutil
 import numpy as np
 from PIL import Image, ImageOps
@@ -19,13 +19,9 @@ class Techniques:
 
     def _get_path_with_suffix(self, path: str, suffix: str):
         directory = os.path.dirname(path)
-        if str(self.input_directory) in path:
-            directory = directory.replace(str(self.input_directory), "")[1:]
-        else:
-            directory = directory.replace(str(self.output_directory), "")[1:]
+        directory = directory.replace('postprocessed', 'augmented')
         filename = Path(path).stem
         return os.path.join(
-            self.output_directory,
             Path(directory),
             Path(f"{filename}_{suffix}.png")
         )
@@ -93,10 +89,13 @@ class Techniques:
             f'_hue{hue}_saturation{sat}_value{val}')
         img.close()
 
-    def color_jitter(self, image_path: str):
+    def color_jitter(self, image_path: str, values_for_variations=None):
         """Apply color jittering to image."""
 
-        values = np.array([0.5, 1.5, 2])
+        if values_for_variations is None:
+            values = np.array([0.5, 1.5, 2])
+        else:
+            values = np.array(values_for_variations)
 
         combinations = np.array(list(np.unique(np.array(np.meshgrid(
             values, values, values)).T.reshape(-1, 3), axis=0)))
@@ -113,45 +112,76 @@ class Utils:
         self.output_directory = Path(output_dir)
         os.makedirs(self.output_directory, exist_ok=True)
 
-    def _batch_process(self, args: tuple[Callable, List[str]]) -> None:
+    def _batch_process(self, data: tuple[Callable, List[str], tuple]) -> None:
         """Helper function to apply the function to a batch of files."""
-        function, file_batch = args
+        function, file_batch, *args = data
         for file in file_batch:
-            function(file)
+            function(file, *args)
 
-    def augment_data(self, techniques_instance: Techniques, function: Callable,
-                     to_files: Optional[List[str]] = None, use_processed_images=False):
-        """Apply on bulk functions to the choosen input directory."""
-        files = []
+    def smart_augmentation(self, techniques: Techniques, goal: int):
 
-        if to_files is None:
-            if use_processed_images is False:
-                for (dirpath, _, filenames) in os.walk(techniques_instance.input_directory):
-                    files += [os.path.join(dirpath, file)
-                              for file in filenames]
-            else:
-                for (dirpath, _, filenames) in os.walk(techniques_instance.output_directory):
-                    files += [os.path.join(dirpath, file)
-                              for file in filenames]
-        else:
-            files = to_files
+        def get_deepest_directories(root_dir):
+            max_depth = 0
+            deepest_dirs = []
 
-        batch_size = min(1000, max(
-            1, int(len(files) / (np.log(len(files)) * cpu_count()))))
+            for root, _, _ in os.walk(root_dir):
+                depth = str(root).count(os.sep) - str(root_dir).count(os.sep)
 
-        # Split files into batches
-        file_batches = [files[i:i + batch_size]
-                        for i in range(0, len(files), batch_size)]
+                if depth > max_depth:
+                    max_depth = depth
+                    deepest_dirs = [os.path.abspath(root)]
+                elif depth == max_depth:
+                    deepest_dirs.append(os.path.abspath(root))
 
-        with Pool() as pool, tqdm(
-                total=len(file_batches),
-                desc=function.__name__,
-                unit="batch") as pbar:
-            for _ in pool.imap_unordered(self._batch_process,
-                                         [(function, file_batch) for file_batch in file_batches]):
-                pbar.update(1)
+            return deepest_dirs
 
-        return files
+        def get_files(input_path: str):
+            files = []
+            for (dirpath, _, filenames) in os.walk(input_path):
+                files += [os.path.join(dirpath, file)
+                          for file in filenames]
+            return files
+
+        def apply_method(function: Callable, files: List[str], *args):
+            batch_size = max(
+                1, int(len(files) / (np.log(len(files)) * cpu_count())))
+
+            file_batches = [files[i:i + batch_size]
+                            for i in range(0, len(files), batch_size)]
+
+            with Pool() as pool, tqdm(
+                    total=len(file_batches),
+                    desc=function.__name__,
+                    unit="batch") as pbar:
+                for _ in pool.imap_unordered(self._batch_process,
+                                             [(function, file_batch, *args
+                                               ) for file_batch in file_batches]):
+                    pbar.update(1)
+
+        total_directories = len(
+            get_deepest_directories(techniques.input_directory))
+
+        for i, (input_dir, output_dir) in enumerate(zip(
+                get_deepest_directories(techniques.input_directory),
+                get_deepest_directories(techniques.output_directory))):
+            print(
+                f'Augmenting {os.path.basename(input_dir)} ({i}/{total_directories})')
+
+            files = get_files(input_dir)
+            apply_method(techniques.mirror, files)
+            apply_method(techniques.flip, files)
+            apply_method(techniques.rotate, files)
+
+            # (x + x * (1 + 1 + 3)) * y^3 * 2 = goal
+            exponent = int(np.ceil(np.cbrt(goal / (12 * len(files)))))
+            array_for_jittering = list(
+                np.around(np.linspace(0.5, 2, exponent), 2))
+
+            files = get_files(output_dir)
+            apply_method(techniques.color_jitter, files, array_for_jittering)
+
+            files = get_files(output_dir)
+            apply_method(techniques.invert, files)
 
     def preprocess_data(self, input_dir: str):
         for root, _, files in tqdm(

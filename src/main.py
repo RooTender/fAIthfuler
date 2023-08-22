@@ -23,13 +23,7 @@ def augment_datasets(output_scale_ratio: int):
         os.path.join("..", "data", "output", "augmented"))
 
     utils.prepare_data(output_scale_ratio)
-    utils.augment_data(techniques, techniques.flip)
-    utils.augment_data(techniques, techniques.mirror)
-    utils.augment_data(techniques, techniques.rotate)
-    utils.augment_data(techniques, techniques.color_jitter,
-                       use_processed_images=True)
-    utils.augment_data(techniques, techniques.invert,
-                       use_processed_images=True)
+    utils.smart_augmentation(techniques, 100000)
 
 
 if __name__ == '__main__':
