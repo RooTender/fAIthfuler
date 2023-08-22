@@ -5,7 +5,6 @@ import torch
 from torch import nn, optim
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
-import piq
 from PIL import Image
 from tqdm import tqdm
 import wandb
@@ -40,23 +39,27 @@ class FaithfulNet(nn.Module):
 
 
 class ImageLoaderDataset(Dataset):
-    def __init__(self, root_dir, transform=None):
-        self.root_dir = root_dir
+    def __init__(self, input_root_dir, output_root_dir, transform=None):
+        self.input_root_dir = input_root_dir
+        self.output_root_dir = output_root_dir
         self.transform = transform
-        self.image_paths = [os.path.join(root_dir, file)
-                            for file in os.listdir(root_dir)]
+        self.image_paths = [(os.path.join(input_root_dir, file),
+                             os.path.join(output_root_dir, file))
+                            for file in os.listdir(input_root_dir)]
 
     def __len__(self):
         return len(self.image_paths)
 
     def __getitem__(self, idx):
-        image_path = self.image_paths[idx]
-        image = Image.open(image_path)
+        input_image_path, output_image_path = self.image_paths[idx]
+        input_image = Image.open(input_image_path)
+        output_image = Image.open(output_image_path)
 
         if self.transform:
-            image = self.transform(image)
+            input_image = self.transform(input_image)
+            output_image = self.transform(output_image)
 
-        return image
+        return input_image, output_image
 
 
 class CNN:
@@ -71,16 +74,12 @@ class CNN:
             transforms.ToTensor()  # Convert images to tensors
         ])
 
-        input_data = ImageLoaderDataset(input_path, transform=transformator)
-        print('Input loaded!')
+        input_data = ImageLoaderDataset(
+            input_path, output_path, transform=transformator)
 
-        output_data = ImageLoaderDataset(output_path, transform=transformator)
-        print('Output loaded!')
+        return DataLoader(input_data, batch_size=batch_size, pin_memory=True)
 
-        return DataLoader(input_data, batch_size=batch_size, pin_memory=True), DataLoader(
-            output_data, batch_size=batch_size, pin_memory=True)
-
-    def __train(self, dir_for_models: str, input_data: DataLoader, output_data: DataLoader,
+    def __train(self, dir_for_models: str, data_loader: DataLoader,
                 num_of_epochs: int, learning_rate: float, early_stopping_patience: int,
                 optimizer_type: str = 'adam',
                 fine_tune_model: str = ''):
@@ -93,8 +92,8 @@ class CNN:
         else:
             raise ValueError("Unsupported optimizer type:", optimizer_type)
 
+        criterion_l1 = nn.L1Loss()
         criterion_mse = nn.MSELoss()
-        criterion_ssim = piq.SSIMLoss()
 
         if fine_tune_model != '':
             checkpoint = torch.load(fine_tune_model)
@@ -111,15 +110,14 @@ class CNN:
         no_improvement_count = 0
 
         for epoch in range(start_epoch, start_epoch + num_of_epochs):
-            total_psnr = 0.0
-            total_ssim = 0.0
+            total_l1 = 0.0
             total_mse = 0.0
 
             total_loss = 0.0
             total_batches = 0
 
-            for input_batch, output_batch in tqdm(
-                    zip(input_data, output_data),
+            for (input_batch, output_batch) in tqdm(
+                    data_loader,
                     unit="batch",
                     desc=f'epoch {epoch}'):
 
@@ -130,22 +128,17 @@ class CNN:
                 prediction = model(input_batch)
 
                 # Loss
-                # Rescale from [-1, 1] to [0, 1]
-                prediction = (prediction + 1) / 2.0
-                output_batch = (output_batch + 1) / 2.0
-
+                l1_loss = criterion_l1(prediction, output_batch)
                 mse_loss = criterion_mse(prediction, output_batch)
-                ssim_loss = criterion_ssim(prediction, output_batch)
-                loss = 0.8 * mse_loss + 0.2 * ssim_loss
+
+                loss = 0.5 * l1_loss + 0.5 * mse_loss
 
                 total_loss += loss.item()
                 total_batches += 1
 
                 # Metrics
+                total_l1 += l1_loss.item()
                 total_mse += mse_loss.item()
-                total_psnr += piq.psnr(prediction, output_batch).item()
-                total_ssim += piq.ssim(
-                    prediction, output_batch).item()  # type: ignore
 
                 # Step
                 loss.backward()
@@ -153,15 +146,13 @@ class CNN:
                     model.parameters(), max_norm=1.0)
                 optimizer.step()
 
+            avg_l1 = total_l1 / total_batches
             avg_mse = total_mse / total_batches
-            avg_psnr = total_psnr / total_batches
-            avg_ssim = total_ssim / total_batches
             avg_loss = total_loss / total_batches
 
             wandb.log({
+                "L1": avg_l1,
                 "mse": avg_mse,
-                "psnr": avg_psnr,
-                "ssim": avg_ssim,
                 "loss": avg_loss})
 
             if avg_loss < best_loss:
@@ -180,20 +171,18 @@ class CNN:
                           early_stopping_patience, "epochs.")
                     break
 
-    def run(self, directory_for_saving_models: str,
-            input_path: str, output_path: str,
-            fine_tune_model: str = ''):
+    def run(self, input_path: str, output_path: str, fine_tune_model: str = ''):
         """Just a test..."""
 
-        # SGD performs the best on 0.3
+        # SGD performs the best on 0.1
         # Adam on 0.001
-        learning_rate = 0.3
+        learning_rate = 0.01
 
-        # SGD on 32
+        # SGD on 16
         # Adam on ???
         batch_size = 16
-        epochs = 10
-        patience = epochs
+        epochs = 100
+        patience = 20
         optimizer = 'sgd'
 
         # start a new wandb run to track this script
@@ -218,17 +207,50 @@ class CNN:
         else:
             print("CUDA detected! Initializing...")
 
-        original_data, style_data = self.__load_data(
+        loaded_data = self.__load_data(
             input_path=input_path,
             output_path=output_path,
             batch_size=batch_size
         )
 
         # simulate training
-        self.__train(f'{directory_for_saving_models}_b{batch_size}_lr{learning_rate}',
-                     original_data, style_data,
+        self.__train(f'{os.path.dirname(input_path)}_b{batch_size}_lr{learning_rate}',
+                     loaded_data,
                      epochs, learning_rate, patience,
                      optimizer_type=optimizer,
                      fine_tune_model=fine_tune_model)
 
         wandb.finish()
+
+    def generate_image(self, input_image_path: str, model_path="faithfulnet.pth"):
+        """Generates an image using a GAN generator model."""
+
+        # Load the FaithfulNet model and its trained weights
+        model = FaithfulNet()
+        model.load_state_dict(torch.load(model_path))
+        model.cuda()
+        model.eval()
+
+        # Load and preprocess the input image
+        input_image = Image.open(input_image_path)
+        transform = transforms.Compose([
+            transforms.ToTensor()
+        ])
+        input_tensor = transform(input_image).unsqueeze(  # type: ignore
+            0).cuda()
+
+        # Generate the image
+        with torch.no_grad():
+            generated_image = model(input_tensor)
+
+        # Post-process the generated image
+        # Rescale from [-1, 1] to [0, 1]
+        generated_image = generated_image.squeeze().cpu().detach()
+        generated_image = (generated_image + 1) / 2.0
+        generated_image = transforms.ToPILImage()(generated_image)
+        # Convert the tensor to a PIL image (assuming it's an RGB image)
+
+        os.makedirs(os.path.join('..', 'out'), exist_ok=True)
+        generated_image.save(os.path.join(
+            '..', 'out', os.path.basename(input_image_path)))
+        generated_image.close()
