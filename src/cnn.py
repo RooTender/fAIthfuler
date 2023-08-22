@@ -3,6 +3,7 @@ import os
 import sys
 import torch
 from torch import nn, optim
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from PIL import Image
@@ -17,15 +18,9 @@ class FaithfulNet(nn.Module):
         super(FaithfulNet, self).__init__()
         # Upscaling layers (for example, using Transposed Convolution)
         self.upscale = nn.Sequential(
-            nn.ConvTranspose2d(4, 256, kernel_size=4, stride=2, padding=1),
-            nn.BatchNorm2d(256),
-            nn.LeakyReLU(0.01, inplace=True),
+            nn.Upsample(scale_factor=2, mode='nearest'),
 
-            nn.Conv2d(256, 128, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(128),
-            nn.LeakyReLU(0.01, inplace=True),
-
-            nn.Conv2d(128, 64, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(4, 64, kernel_size=3, stride=1, padding=1),
             nn.BatchNorm2d(64),
             nn.LeakyReLU(0.01, inplace=True),
 
@@ -77,7 +72,7 @@ class CNN:
         input_data = ImageLoaderDataset(
             input_path, output_path, transform=transformator)
 
-        return DataLoader(input_data, batch_size=batch_size, pin_memory=True)
+        return DataLoader(input_data, batch_size=batch_size, pin_memory=True, num_workers=4)
 
     def __train(self, dir_for_models: str, data_loader: DataLoader,
                 num_of_epochs: int, learning_rate: float, early_stopping_patience: int,
@@ -91,6 +86,15 @@ class CNN:
             optimizer = optim.SGD(model.parameters(), lr=learning_rate)
         else:
             raise ValueError("Unsupported optimizer type:", optimizer_type)
+
+        lr_scheduler = ReduceLROnPlateau(
+            optimizer,
+            mode='min',
+            factor=0.5,
+            patience=10,
+            cooldown=20,
+            verbose=True
+        )
 
         criterion_l1 = nn.L1Loss()
         criterion_mse = nn.MSELoss()
@@ -106,8 +110,6 @@ class CNN:
         else:
             start_epoch = 0
             best_loss = float('inf')
-
-        no_improvement_count = 0
 
         for epoch in range(start_epoch, start_epoch + num_of_epochs):
             total_l1 = 0.0
@@ -131,7 +133,7 @@ class CNN:
                 l1_loss = criterion_l1(prediction, output_batch)
                 mse_loss = criterion_mse(prediction, output_batch)
 
-                loss = 0.5 * l1_loss + 0.5 * mse_loss
+                loss = 0.8 * l1_loss + 0.2 * mse_loss
 
                 total_loss += loss.item()
                 total_batches += 1
@@ -157,46 +159,42 @@ class CNN:
 
             if avg_loss < best_loss:
                 best_loss = avg_loss
-                best_model_state = model.state_dict()
-                no_improvement_count = 0
 
-                os.makedirs(os.path.join(
-                    '..', 'models', dir_for_models), exist_ok=True)
-                torch.save(best_model_state, os.path.join(
-                    '..', 'models', dir_for_models, f'e{epoch}_l{avg_loss:.4f}.pth'))
-            else:
-                no_improvement_count += 1
-                if no_improvement_count >= early_stopping_patience:
-                    print("Early stopping: No improvement for",
-                          early_stopping_patience, "epochs.")
-                    break
+                os.makedirs(os.path.join('..', 'models',
+                            dir_for_models), exist_ok=True)
+                torch.save(model.state_dict(), os.path.join(
+                    '..', 'models', dir_for_models, f'e{epoch}_lr{optimizer.param_groups[0]["lr"]}_l{avg_loss:.4f}.pth'))
+
+            lr_scheduler.step(avg_loss)
 
     def run(self, input_path: str, output_path: str, fine_tune_model: str = ''):
         """Just a test..."""
 
         # SGD performs the best on 0.1
         # Adam on 0.001
-        learning_rate = 0.01
+        learning_rate = 0.2
 
         # SGD on 16
         # Adam on ???
-        batch_size = 16
+        batch_size = 64
         epochs = 100
         patience = 20
         optimizer = 'sgd'
+
+        dimensions = os.path.basename(os.path.normpath(input_path))
 
         # start a new wandb run to track this script
         wandb.init(
             # set the wandb project where this run will be logged
             project="FAIthfuler",
             entity="rootender",
-            name="FaithfulNet",
+            name=f"FaithfulNet_{dimensions}",
             # track hyperparameters and run metadata
             config={
                 "architecture": "CNN",
                 "learning_rate": learning_rate,
                 "batch_size": batch_size,
-                "hidden_layer_sizes": [256, 128, 64, 4],
+                "hidden_layer_sizes": [64],
                 "optimizer": optimizer
             }
         )
@@ -214,7 +212,7 @@ class CNN:
         )
 
         # simulate training
-        self.__train(f'{os.path.dirname(input_path)}_b{batch_size}_lr{learning_rate}',
+        self.__train(f'{dimensions}_b{batch_size}_lr{learning_rate}',
                      loaded_data,
                      epochs, learning_rate, patience,
                      optimizer_type=optimizer,
