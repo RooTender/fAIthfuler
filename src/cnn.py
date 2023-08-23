@@ -3,7 +3,6 @@ import os
 import sys
 import torch
 from torch import nn, optim
-from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from PIL import Image
@@ -18,9 +17,15 @@ class FaithfulNet(nn.Module):
         super(FaithfulNet, self).__init__()
         # Upscaling layers (for example, using Transposed Convolution)
         self.upscale = nn.Sequential(
-            nn.Upsample(scale_factor=2, mode='nearest'),
+            nn.ConvTranspose2d(4, 64, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
 
-            nn.Conv2d(4, 64, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True),
+
+            nn.Conv2d(128, 64, kernel_size=3, stride=1, padding=1),
             nn.BatchNorm2d(64),
             nn.LeakyReLU(0.01, inplace=True),
 
@@ -31,6 +36,30 @@ class FaithfulNet(nn.Module):
     def forward(self, image):
         """Forward function of the neural network."""
         return self.upscale(image)
+
+
+class Discriminator(nn.Module):
+    def __init__(self):
+        super(Discriminator, self).__init__()
+        self.model = nn.Sequential(
+            nn.Conv2d(4, 64, kernel_size=3, stride=1, padding=1),
+            nn.LeakyReLU(0.01, inplace=True),
+
+            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(128),
+            nn.LeakyReLU(0.01, inplace=True),
+
+            nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(256),
+            nn.LeakyReLU(0.01, inplace=True),
+
+            nn.Flatten(),
+            nn.Linear(256 * 4 * 4, 1),
+            nn.Sigmoid()
+        )
+
+    def forward(self, image):
+        return self.model(image)
 
 
 class ImageLoaderDataset(Dataset):
@@ -75,47 +104,34 @@ class CNN:
         return DataLoader(input_data, batch_size=batch_size, pin_memory=True, num_workers=4)
 
     def __train(self, dir_for_models: str, data_loader: DataLoader,
-                num_of_epochs: int, learning_rate: float, early_stopping_patience: int,
-                optimizer_type: str = 'adam',
-                fine_tune_model: str = ''):
-        model = FaithfulNet().cuda()
+                num_of_epochs: int, learning_rate: float):
 
-        if optimizer_type == 'adam':
-            optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-        elif optimizer_type == 'sgd':
-            optimizer = optim.SGD(model.parameters(), lr=learning_rate)
-        else:
-            raise ValueError("Unsupported optimizer type:", optimizer_type)
+        # Initialize Generator and Discriminator
+        generator = FaithfulNet().cuda()
+        discriminator = Discriminator().cuda()
 
-        lr_scheduler = ReduceLROnPlateau(
-            optimizer,
-            mode='min',
-            factor=0.5,
-            patience=10,
-            cooldown=20,
-            verbose=True
-        )
+        # Optimizers
+        generator_optim = optim.Adam(generator.parameters(), lr=learning_rate)
+        discriminator_optim = optim.Adam(
+            discriminator.parameters(), lr=learning_rate)
 
-        criterion_l1 = nn.L1Loss()
-        criterion_mse = nn.MSELoss()
+        # Losses
+        criterion_gan = nn.BCELoss()
 
-        if fine_tune_model != '':
-            checkpoint = torch.load(fine_tune_model)
+        def criterion_content(prediction, target):
+            return 0.8 * nn.L1Loss()(prediction, target) + 0.2 * nn.MSELoss()(prediction, target)
 
-            model.load_state_dict(checkpoint['model_state_dict'])
-            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            start_epoch = checkpoint['epoch']
-            best_loss = checkpoint['loss']
+        best_loss = float('inf')
 
-        else:
-            start_epoch = 0
-            best_loss = float('inf')
+        for epoch in range(num_of_epochs):
+            total_real_loss = 0.0
+            total_fake_loss = 0.0
+            total_discriminator_loss = 0.0
 
-        for epoch in range(start_epoch, start_epoch + num_of_epochs):
-            total_l1 = 0.0
-            total_mse = 0.0
+            total_content_loss = 0.0
+            total_generator_loss = 0.0
+            total_gan_loss = 0.0
 
-            total_loss = 0.0
             total_batches = 0
 
             for (input_batch, output_batch) in tqdm(
@@ -126,59 +142,92 @@ class CNN:
                 input_batch = input_batch.cuda()
                 output_batch = output_batch.cuda()
 
-                optimizer.zero_grad()
-                prediction = model(input_batch)
+                # Train Discriminator
+                discriminator_optim.zero_grad()
 
-                # Loss
-                l1_loss = criterion_l1(prediction, output_batch)
-                mse_loss = criterion_mse(prediction, output_batch)
+                # Real Images
+                real_output = discriminator(output_batch)
+                real_loss = criterion_gan(
+                    real_output, torch.ones_like(real_output).cuda())
+                total_real_loss += real_loss
 
-                loss = 0.8 * l1_loss + 0.2 * mse_loss
+                # Fake Images
+                fake_images = generator(input_batch)
+                fake_output = discriminator(fake_images.detach())
+                fake_loss = criterion_gan(
+                    fake_output, torch.zeros_like(fake_output).cuda())
+                total_fake_loss += fake_loss
 
-                total_loss += loss.item()
+                # Combine losses and update Discriminator
+                discriminator_loss = real_loss + fake_loss
+                total_discriminator_loss += discriminator_loss
+                discriminator_loss.backward()
+                nn.utils.clip_grad.clip_grad_norm_(
+                    discriminator.parameters(), max_norm=1.0)
+                discriminator_optim.step()
+
+                # Train Generator
+                generator_optim.zero_grad()
+
+                # Content loss (MSE or L1)
+                content_loss = criterion_content(fake_images, output_batch)
+                total_content_loss += content_loss
+
+                # GAN loss
+                generator_fake_output = discriminator(fake_images)
+                gan_loss = criterion_gan(
+                    generator_fake_output, torch.ones_like(generator_fake_output).cuda())
+                total_gan_loss += gan_loss
+
+                # Combine losses and update Generator
+                generator_loss = content_loss + gan_loss
+                total_generator_loss += generator_loss
+                generator_loss.backward()
+                nn.utils.clip_grad.clip_grad_norm_(
+                    generator.parameters(), max_norm=1.0)
+                generator_optim.step()
+
                 total_batches += 1
 
-                # Metrics
-                total_l1 += l1_loss.item()
-                total_mse += mse_loss.item()
+            avg_real_loss = total_real_loss / total_batches
+            avg_fake_loss = total_fake_loss / total_batches
+            avg_discriminator_loss = total_discriminator_loss / total_batches
 
-                # Step
-                loss.backward()
-                nn.utils.clip_grad.clip_grad_norm_(
-                    model.parameters(), max_norm=1.0)
-                optimizer.step()
+            avg_content_loss = total_content_loss / total_batches
+            avg_gan_loss = total_gan_loss / total_batches
+            avg_generator_loss = total_generator_loss / total_batches
 
-            avg_l1 = total_l1 / total_batches
-            avg_mse = total_mse / total_batches
-            avg_loss = total_loss / total_batches
+            avg_loss = (
+                (total_generator_loss + total_discriminator_loss) / 2) / total_batches
 
-            wandb.log({
-                "L1": avg_l1,
-                "mse": avg_mse,
-                "loss": avg_loss})
+            wandb.log({"Real images loss": avg_real_loss, "Fake images loss": avg_fake_loss,
+                      "Discriminator loss": avg_discriminator_loss})
+            wandb.log({"Content loss": avg_content_loss,
+                      "GAN loss": avg_gan_loss, "Generator loss": avg_generator_loss})
+            wandb.log({"Loss": avg_loss})
 
             if avg_loss < best_loss:
                 best_loss = avg_loss
 
                 os.makedirs(os.path.join('..', 'models',
                             dir_for_models), exist_ok=True)
-                torch.save(model.state_dict(), os.path.join(
-                    '..', 'models', dir_for_models, f'e{epoch}_lr{optimizer.param_groups[0]["lr"]}_l{avg_loss:.4f}.pth'))
+                path_to_save = os.path.join('..', 'models', dir_for_models)
+                torch.save(generator.state_dict(), os.path.join(
+                    path_to_save, f'G_e{epoch}_{avg_generator_loss:.4f}.pth'))
+                torch.save(discriminator.state_dict(), os.path.join(
+                    path_to_save, f'D_e{epoch}_{avg_discriminator_loss:.4f}.pth'))
 
-            lr_scheduler.step(avg_loss)
-
-    def run(self, input_path: str, output_path: str, fine_tune_model: str = ''):
+    def run(self, input_path: str, output_path: str):
         """Just a test..."""
 
         # SGD performs the best on 0.1
         # Adam on 0.001
-        learning_rate = 0.2
+        learning_rate = 0.005
 
         # SGD on 16
         # Adam on ???
         batch_size = 64
         epochs = 100
-        patience = 20
         optimizer = 'sgd'
 
         dimensions = os.path.basename(os.path.normpath(input_path))
@@ -213,10 +262,7 @@ class CNN:
 
         # simulate training
         self.__train(f'{dimensions}_b{batch_size}_lr{learning_rate}',
-                     loaded_data,
-                     epochs, learning_rate, patience,
-                     optimizer_type=optimizer,
-                     fine_tune_model=fine_tune_model)
+                     loaded_data, epochs, learning_rate)
 
         wandb.finish()
 
