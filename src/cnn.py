@@ -3,8 +3,9 @@ import os
 import sys
 import torch
 from torch import nn, optim
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler
 from torchvision import transforms
+import numpy as np
 from PIL import Image
 from tqdm import tqdm
 import wandb
@@ -89,7 +90,7 @@ class ImageLoaderDataset(Dataset):
 class CNN:
     """Trains neural networks and evaluates them."""
 
-    def __load_data(self, input_path: str, output_path: str, batch_size: int):
+    def __load_data(self, input_path: str, output_path: str, batch_size: int, validation_split: float = 0.2):
         print(f'Input dataset: {input_path}')
         print(f'Output dataset: {output_path}')
         print('Reading datasets...')
@@ -101,9 +102,24 @@ class CNN:
         input_data = ImageLoaderDataset(
             input_path, output_path, transform=transformator)
 
-        return DataLoader(input_data, batch_size=batch_size, pin_memory=True, num_workers=4)
+        # Splitting the dataset into training and validation sets
+        num_train = len(input_data)
+        indices = list(range(num_train))
+        split = int(np.floor(validation_split * num_train))
 
-    def __train(self, dir_for_models: str, data_loader: DataLoader,
+        np.random.shuffle(indices)
+        train_idx, valid_idx = indices[split:], indices[:split]
+        train_sampler = SubsetRandomSampler(train_idx)
+        valid_sampler = SubsetRandomSampler(valid_idx)
+
+        train_loader = DataLoader(input_data, batch_size=batch_size,
+                                  sampler=train_sampler, pin_memory=True, num_workers=4)
+        valid_loader = DataLoader(input_data, batch_size=batch_size,
+                                  sampler=valid_sampler, pin_memory=True, num_workers=4)
+
+        return train_loader, valid_loader
+
+    def __train(self, dir_for_models: str, train_set: DataLoader, valid_set: DataLoader,
                 num_of_epochs: int, learning_rate: float):
 
         # Initialize Generator and Discriminator
@@ -135,7 +151,7 @@ class CNN:
             total_batches = 0
 
             for (input_batch, output_batch) in tqdm(
-                    data_loader,
+                    train_set,
                     unit="batch",
                     desc=f'epoch {epoch}'):
 
@@ -200,11 +216,47 @@ class CNN:
             avg_loss = (
                 (total_generator_loss + total_discriminator_loss) / 2) / total_batches
 
-            wandb.log({"Real images loss": avg_real_loss, "Fake images loss": avg_fake_loss,
-                      "Discriminator loss": avg_discriminator_loss})
-            wandb.log({"Content loss": avg_content_loss,
-                      "GAN loss": avg_gan_loss, "Generator loss": avg_generator_loss})
-            wandb.log({"Loss": avg_loss})
+            wandb.log({"train": {"Real images loss": avg_real_loss,
+                                 "Fake images loss": avg_fake_loss,
+                                 "Discriminator loss": avg_discriminator_loss,
+                                 "Content loss": avg_content_loss,
+                                 "GAN loss": avg_gan_loss,
+                                 "Generator loss": avg_generator_loss,
+                                 "Loss": avg_loss}})
+
+            with torch.no_grad():
+                total_fake_loss = 0.0
+                total_real_loss = 0.0
+                total_validation_loss = 0.0
+
+                total_validation_batches = 0
+
+                for (input_batch, output_batch) in tqdm(valid_set, unit="batch", desc=f'validating epoch {epoch}'):
+                    input_batch = input_batch.cuda()
+                    output_batch = output_batch.cuda()
+
+                    # Forward pass
+                    fake_images = generator(input_batch)
+                    real_output = discriminator(output_batch)
+                    fake_output = discriminator(fake_images.detach())
+
+                    # Compute losses (similar to your training loop but without updates)
+                    real_loss = criterion_gan(
+                        real_output, torch.ones_like(real_output).cuda())
+                    fake_loss = criterion_gan(
+                        fake_output, torch.zeros_like(fake_output).cuda())
+                    validation_loss = real_loss + fake_loss
+
+                    total_validation_loss += validation_loss
+                    total_validation_batches += 1
+
+                avg_validation_loss = total_validation_loss / total_validation_batches
+                avg_real_loss = total_real_loss / total_validation_batches
+                avg_fake_loss = total_fake_loss / total_validation_batches
+
+                wandb.log({"validation": {"Loss": avg_validation_loss,
+                                          "Real images loss": avg_real_loss,
+                                          "Fake images loss": avg_fake_loss}})
 
             if avg_loss < best_loss:
                 best_loss = avg_loss
@@ -254,7 +306,7 @@ class CNN:
         else:
             print("CUDA detected! Initializing...")
 
-        loaded_data = self.__load_data(
+        train_set, validation_set = self.__load_data(
             input_path=input_path,
             output_path=output_path,
             batch_size=batch_size
@@ -262,7 +314,7 @@ class CNN:
 
         # simulate training
         self.__train(f'{dimensions}_b{batch_size}_lr{learning_rate}',
-                     loaded_data, epochs, learning_rate)
+                     train_set, validation_set, epochs, learning_rate)
 
         wandb.finish()
 
