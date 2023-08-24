@@ -1,5 +1,6 @@
 """Provides CNN utils made for training neural network."""
 import os
+import shutil
 import sys
 import torch
 from torch import nn, optim
@@ -90,7 +91,8 @@ class ImageLoaderDataset(Dataset):
 class CNN:
     """Trains neural networks and evaluates them."""
 
-    def __load_data(self, input_path: str, output_path: str, batch_size: int, validation_split: float = 0.2):
+    def __load_data(self, input_path: str, output_path: str, 
+                    batch_size: int, validation_split: float = 0.2):
         print(f'Input dataset: {input_path}')
         print(f'Output dataset: {output_path}')
         print('Reading datasets...')
@@ -120,12 +122,20 @@ class CNN:
         return train_loader, valid_loader
 
     def __train(self, dir_for_models: str, train_set: DataLoader, valid_set: DataLoader,
-                num_of_epochs: int, learning_rate: float):
-        path_to_save = os.path.join('..', 'models', dir_for_models)
+                num_of_epochs: int, learning_rate: float, finetune_from_epoch: int = -1):
+        models_path = os.path.join('..', 'models', dir_for_models)
 
         # Initialize Generator and Discriminator
         generator = FaithfulNet().cuda()
         discriminator = Discriminator().cuda()
+
+        if finetune_from_epoch >= 0:
+            for model_name in os.listdir(os.path.join(models_path, f'e{finetune_from_epoch}')):
+                model_path = os.path.join(models_path, f'e{finetune_from_epoch}', model_name)
+                if "generator" in model_name:
+                    generator.load_state_dict(torch.load(model_path))
+                else:
+                    discriminator.load_state_dict(torch.load(model_path))
 
         # Optimizers
         generator_optim = optim.Adam(generator.parameters(), lr=learning_rate)
@@ -138,8 +148,7 @@ class CNN:
         def criterion_content(prediction, target):
             return 0.8 * nn.L1Loss()(prediction, target) + 0.2 * nn.MSELoss()(prediction, target)
 
-        best_loss = float('inf')
-        train_discriminator = True
+        train_discriminator = False
 
         total_real_loss = 0.0
         total_fake_loss = 0.0
@@ -224,21 +233,13 @@ class CNN:
             avg_loss = (
                 (total_generator_loss + total_discriminator_loss) / 2) / total_batches
 
-            wandb.log({"train": {"Real images loss": avg_real_loss,
-                                 "Fake images loss": avg_fake_loss,
-                                 "Discriminator loss": avg_discriminator_loss,
-                                 "Content loss": avg_content_loss,
-                                 "GAN loss": avg_gan_loss,
-                                 "Generator loss": avg_generator_loss,
-                                 "Loss": avg_loss}})
-
             with torch.no_grad():
-                total_content_loss = 0.0
-                total_gan_loss = 0.0
-                total_generator_loss = 0.0
-                total_discriminator_loss = 0.0
+                total_val_content_loss = 0.0
+                total_val_gan_loss = 0.0
+                total_val_generator_loss = 0.0
+                total_val_discriminator_loss = 0.0
 
-                total_validation_batches = 0
+                total_val_batches = 0
 
                 for (input_batch, output_batch) in tqdm(
                     valid_set,
@@ -252,58 +253,60 @@ class CNN:
 
                     # Content loss (MSE or L1)
                     content_loss = criterion_content(fake_images, output_batch)
-                    total_content_loss += content_loss
+                    total_val_content_loss += content_loss
 
                     # GAN loss
                     generator_fake_output = discriminator(fake_images)
                     gan_loss = criterion_gan(
                         generator_fake_output, torch.ones_like(generator_fake_output).cuda())
-                    total_gan_loss += gan_loss
+                    total_val_gan_loss += gan_loss
 
                     real_output = discriminator(output_batch)
                     fake_output = discriminator(fake_images.detach())
 
                     # Combine losses for Generator
                     generator_loss = content_loss + gan_loss
-                    total_generator_loss += generator_loss
+                    total_val_generator_loss += generator_loss
 
                     # Discriminator loss
                     real_loss = criterion_gan(
                         real_output, torch.ones_like(real_output).cuda())
                     fake_loss = criterion_gan(
                         fake_output, torch.zeros_like(fake_output).cuda())
-                    total_discriminator_loss = real_loss + fake_loss
+                    total_val_discriminator_loss = real_loss + fake_loss
 
-                    total_validation_batches += 1
+                    total_val_batches += 1
 
-                avg_content_loss = total_content_loss / total_validation_batches
-                avg_gan_loss = total_gan_loss / total_validation_batches
-                avg_generator_loss = total_generator_loss / total_validation_batches
-                avg_discriminator_loss = total_discriminator_loss / total_validation_batches
+                avg_val_content_loss = total_val_content_loss / total_val_batches
+                avg_val_gan_loss = total_val_gan_loss / total_val_batches
+                avg_val_generator_loss = total_val_generator_loss / total_val_batches
+                avg_val_discriminator_loss = total_val_discriminator_loss / total_val_batches
 
-                wandb.log({"validation": {"Content loss": avg_content_loss,
-                                          "GAN loss": avg_gan_loss,
-                                          "Generator loss": avg_generator_loss,
-                                          "Discriminator loss": avg_discriminator_loss}})
-                
-                train_discriminator = bool(avg_discriminator_loss > 1)
+                wandb.log({"train": {"Real images loss": avg_real_loss,
+                                     "Fake images loss": avg_fake_loss,
+                                     "Discriminator loss": avg_discriminator_loss,
+                                     "Content loss": avg_content_loss,
+                                     "GAN loss": avg_gan_loss,
+                                     "Generator loss": avg_generator_loss,
+                                     "Loss": avg_loss},
+                           "validation": {"Content loss": avg_val_content_loss,
+                                          "GAN loss": avg_val_gan_loss,
+                                          "Generator loss": avg_val_generator_loss,
+                                          "Discriminator loss": avg_val_discriminator_loss}})
 
-            if epoch > 50 and avg_generator_loss < best_loss:
-                best_loss = avg_generator_loss
+                train_discriminator = bool(avg_gan_loss < 1 or avg_discriminator_loss > 1)
 
-                os.makedirs(os.path.join('..', 'models',
-                            dir_for_models), exist_ok=True)
-                torch.save(generator.state_dict(), os.path.join(
-                    path_to_save, f'e{epoch}_D_{avg_generator_loss:.4f}.pth'))
-                torch.save(discriminator.state_dict(), os.path.join(
-                    path_to_save, f'e{epoch}_G_{avg_discriminator_loss:.4f}.pth'))
+            path_to_save = os.path.join(models_path, f'e{epoch}')
+            try:
+                os.makedirs(path_to_save)
+            except OSError:
+                shutil.rmtree(path_to_save)
+                os.makedirs(path_to_save)
 
-        os.makedirs(os.path.join('..', 'models',
-                                dir_for_models), exist_ok=True)    
-        torch.save(generator.state_dict(), os.path.join(
-            path_to_save, 'e_last_D_final.pth'))
-        torch.save(discriminator.state_dict(), os.path.join(
-            path_to_save, 'e_last_G_final.pth'))
+            torch.save(generator.state_dict(), os.path.join(
+                path_to_save, f'generator_{avg_generator_loss:4f}.pth'))
+            torch.save(discriminator.state_dict(), os.path.join(
+                path_to_save, f'discriminator_{avg_discriminator_loss:4f}.pth'))
 
     def run(self, input_path: str, output_path: str):
         """Just a test..."""
