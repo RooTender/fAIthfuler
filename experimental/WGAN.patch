@@ -1,0 +1,382 @@
+diff --git forkSrcPrefix/src/cnn.py forkDstPrefix/src/cnn.py
+index 9db458f970aff47e0eada2b734485fad81bd73a4..bbcba7c66575f4877df3e1c052b8eb87e2e3ac97 100644
+--- forkSrcPrefix/src/cnn.py
++++ forkDstPrefix/src/cnn.py
+@@ -6,6 +6,7 @@ import torch
+ from torch import nn, optim
+ from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler
+ from torchvision import transforms
++from torchvision.models import inception_v3
+ import numpy as np
+ from PIL import Image
+ from tqdm import tqdm
+@@ -40,31 +41,33 @@ class FaithfulNet(nn.Module):
+         return self.upscale(image)
+ 
+ 
+-class Discriminator(nn.Module):
++class Critic(nn.Module):
++    """Critic that is required for WGAN network."""
++
+     def __init__(self):
+-        super(Discriminator, self).__init__()
++        super(Critic, self).__init__()
+         self.model = nn.Sequential(
+             nn.Conv2d(4, 64, kernel_size=3, stride=1, padding=1),
+             nn.LeakyReLU(0.01, inplace=True),
+ 
+             nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),
+-            nn.BatchNorm2d(128),
+             nn.LeakyReLU(0.01, inplace=True),
+ 
+             nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=1),
+-            nn.BatchNorm2d(256),
+             nn.LeakyReLU(0.01, inplace=True),
+ 
+             nn.Flatten(),
+-            nn.Linear(256 * 4 * 4, 1),
+-            nn.Sigmoid()
++            nn.Linear(256 * 4 * 4, 1)
+         )
+ 
+     def forward(self, image):
++        """Forward function of the neural network."""
+         return self.model(image)
+ 
+ 
+ class ImageLoaderDataset(Dataset):
++    """Custom data loader for CNN training."""
++
+     def __init__(self, input_root_dir, output_root_dir, transform=None):
+         self.input_root_dir = input_root_dir
+         self.output_root_dir = output_root_dir
+@@ -91,7 +94,7 @@ class ImageLoaderDataset(Dataset):
+ class CNN:
+     """Trains neural networks and evaluates them."""
+ 
+-    def __load_data(self, input_path: str, output_path: str, 
++    def __load_data(self, input_path: str, output_path: str,
+                     batch_size: int, validation_split: float = 0.2):
+         print(f'Input dataset: {input_path}')
+         print(f'Output dataset: {output_path}')
+@@ -121,48 +124,68 @@ class CNN:
+ 
+         return train_loader, valid_loader
+ 
++    def __calculate_fid(self, images1, images2):
++        model = inception_v3(pretrained=True, transform_input=False).eval().cuda()
++        with torch.no_grad():
++            act1 = model(images1)
++            act2 = model(images2)
++
++        mu1, sigma1 = act1.mean(dim=0), torch.cov(act1)
++        mu2, sigma2 = act2.mean(dim=0), torch.cov(act2)
++
++        ssdiff = torch.sum((mu1 - mu2)**2.0)
++
++        # Calculate sqrt of product between covariances using NumPy
++        prod_cov = sigma1.cpu().numpy().dot(sigma2.cpu().numpy())
++        eigvals, _ = np.linalg.eig(prod_cov)
++        covmean = np.sum(np.sqrt(eigvals))
++
++        fid = ssdiff + torch.trace(sigma1 + sigma2) - 2.0 * covmean
++        return fid
++
+     def __train(self, dir_for_models: str, train_set: DataLoader, valid_set: DataLoader,
+                 num_of_epochs: int, learning_rate: float, finetune_from_epoch: int = -1):
+         models_path = os.path.join('..', 'models', dir_for_models)
+ 
+-        # Initialize Generator and Discriminator
++        # Initialize Generator and Critic
+         generator = FaithfulNet().cuda()
+-        discriminator = Discriminator().cuda()
++        critic = Critic().cuda()
+ 
+         if finetune_from_epoch >= 0:
+-            for model_name in os.listdir(os.path.join(models_path, f'e{finetune_from_epoch}')):
+-                model_path = os.path.join(models_path, f'e{finetune_from_epoch}', model_name)
+-                if "generator" in model_name:
+-                    generator.load_state_dict(torch.load(model_path))
+-                else:
+-                    discriminator.load_state_dict(torch.load(model_path))
++            try:
++                for model_name in os.listdir(os.path.join(models_path, f'e{finetune_from_epoch}')):
++                    model_path = os.path.join(models_path, f'e{finetune_from_epoch}', model_name)
++                    if "generator" in model_name:
++                        generator.load_state_dict(torch.load(model_path))
++                    else:
++                        critic.load_state_dict(torch.load(model_path))
++            except FileNotFoundError:
++                path = os.path.join(models_path, f'e{finetune_from_epoch}')
++                print(f'Cannot find the models to load under path: {path}')
++                print('Are you sure the folder with models exists?')
++                sys.exit(1)
+ 
+         # Optimizers
+-        generator_optim = optim.Adam(generator.parameters(), lr=learning_rate)
+-        discriminator_optim = optim.Adam(
+-            discriminator.parameters(), lr=learning_rate)
+-
+-        # Losses
+-        criterion_gan = nn.BCELoss()
++        generator_optim = optim.RMSprop(generator.parameters(), lr=learning_rate)
++        critic_optim = optim.RMSprop(
++            critic.parameters(), lr=learning_rate)
+ 
+         def criterion_content(prediction, target):
+             return 0.8 * nn.L1Loss()(prediction, target) + 0.2 * nn.MSELoss()(prediction, target)
+ 
+-        train_discriminator = False
+-
+-        total_real_loss = 0.0
+-        total_fake_loss = 0.0
+-        total_discriminator_loss = 0.0
+-
+         for epoch in range(num_of_epochs):
+-            if train_discriminator is True:
+-                total_real_loss = 0.0
+-                total_fake_loss = 0.0
+-                total_discriminator_loss = 0.0
++            total_real_loss = 0.0
++            total_fake_loss = 0.0
++            total_critic_loss = 0.0
+ 
+             total_content_loss = 0.0
+             total_generator_loss = 0.0
+             total_gan_loss = 0.0
++            total_fid = 0.0
++
++            total_true_positives = 0
++            total_false_positives = 0
++            total_false_negatives = 0
+ 
+             total_batches = 0
+ 
+@@ -183,61 +206,87 @@ class CNN:
+                 total_content_loss += content_loss
+ 
+                 # GAN loss
+-                generator_fake_output = discriminator(fake_images)
+-                gan_loss = criterion_gan(
+-                    generator_fake_output, torch.ones_like(generator_fake_output).cuda())
++                generator_fake_output = critic(fake_images)
++                gan_loss = -torch.mean(generator_fake_output)
+                 total_gan_loss += gan_loss
+ 
+                 # Combine losses and update Generator
+                 generator_loss = content_loss + gan_loss
+                 total_generator_loss += generator_loss
+                 generator_loss.backward()
+-                nn.utils.clip_grad.clip_grad_norm_(
+-                    generator.parameters(), max_norm=1.0)
+                 generator_optim.step()
+ 
+-                # Train Discriminator
+-                if train_discriminator:
+-                    discriminator_optim.zero_grad()
+-
+-                    # Real Images
+-                    real_output = discriminator(output_batch)
+-                    real_loss = criterion_gan(
+-                        real_output, torch.ones_like(real_output).cuda())
+-                    total_real_loss += real_loss
+-
+-                    # Fake Images
+-                    fake_output = discriminator(fake_images.detach())
+-                    fake_loss = criterion_gan(
+-                        fake_output, torch.zeros_like(fake_output).cuda())
+-                    total_fake_loss += fake_loss
+-
+-                    # Combine losses and update Discriminator
+-                    discriminator_loss = real_loss + fake_loss
+-                    total_discriminator_loss += discriminator_loss
+-                    discriminator_loss.backward()
+-                    nn.utils.clip_grad.clip_grad_norm_(
+-                        discriminator.parameters(), max_norm=1.0)
+-                    discriminator_optim.step()
++                # Train Critic
++                critic_optim.zero_grad()
++
++                # Real Images
++                real_output = critic(output_batch)
++                real_loss = -torch.mean(real_output)
++                total_real_loss += real_loss
++
++                # Fake Images
++                fake_output = critic(fake_images.detach())
++                fake_loss = -torch.mean(fake_output)
++                total_fake_loss += fake_loss
++
++                # Gradient Penalty
++                alpha = torch.rand(output_batch.size(0), 1, 1, 1).cuda()
++                alpha = alpha.expand_as(output_batch)
++                interpolated = alpha * output_batch + (1 - alpha) * fake_images
++                interpolated = torch.autograd.Variable(interpolated, requires_grad=True)
++                interpolated_output = critic(interpolated)
++                gradients = torch.autograd.grad(
++                    outputs=interpolated_output, inputs=interpolated,
++                    grad_outputs=torch.ones(interpolated_output.size()).cuda(),
++                    create_graph=True, retain_graph=True, only_inputs=True)[0]
++                gradient_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean()
++                lambda_term = 10 # Hyperparameter for gradient penalty
++                gradient_penalty_loss = lambda_term * gradient_penalty
++
++                # Combine losses and update Critic
++                critic_loss = real_loss + fake_loss + gradient_penalty_loss
++                total_critic_loss += critic_loss
++                critic_loss.backward()
++                critic_optim.step()
++
++                # Calculate Precision, Recall, and F1 Score metrics
++                true_positives = (fake_output < 0).sum().item()  # Counting how many fake images were correctly identified
++                false_positives = (real_output < 0).sum().item() # Counting how many real images were incorrectly identified as fake
++                false_negatives = (fake_output > 0).sum().item() # Counting how many fake images were incorrectly identified as real
++
++                total_true_positives += true_positives
++                total_false_positives += false_positives
++                total_false_negatives += false_negatives
++                total_fid += self.__calculate_fid(output_batch, fake_images)
+ 
+                 total_batches += 1
+ 
+             avg_real_loss = total_real_loss / total_batches
+             avg_fake_loss = total_fake_loss / total_batches
+-            avg_discriminator_loss = total_discriminator_loss / total_batches
++            avg_critic_loss = total_critic_loss / total_batches
+ 
+             avg_content_loss = total_content_loss / total_batches
+             avg_gan_loss = total_gan_loss / total_batches
+             avg_generator_loss = total_generator_loss / total_batches
+ 
++            precision = total_true_positives / (total_true_positives + total_false_positives) if total_true_positives + total_false_positives > 0 else 0
++            recall = total_true_positives / (total_true_positives + total_false_negatives) if total_true_positives + total_false_negatives > 0 else 0
++            f1_score = 2 * (precision * recall) / (precision + recall) if precision + recall > 0 else 0
++            fid = total_fid / total_batches
++
+             avg_loss = (
+-                (total_generator_loss + total_discriminator_loss) / 2) / total_batches
++                (total_generator_loss + total_critic_loss) / 2) / total_batches
+ 
+             with torch.no_grad():
+                 total_val_content_loss = 0.0
+                 total_val_gan_loss = 0.0
+                 total_val_generator_loss = 0.0
+-                total_val_discriminator_loss = 0.0
++                total_val_critic_loss = 0.0
++
++                total_true_positives = 0
++                total_false_positives = 0
++                total_false_negatives = 0
++                total_val_fid = 0.0
+ 
+                 total_val_batches = 0
+ 
+@@ -250,51 +299,70 @@ class CNN:
+ 
+                     # Forward pass
+                     fake_images = generator(input_batch)
++                    total_val_fid += self.__calculate_fid(output_batch, fake_images)
+ 
+                     # Content loss (MSE or L1)
+                     content_loss = criterion_content(fake_images, output_batch)
+                     total_val_content_loss += content_loss
+ 
+                     # GAN loss
+-                    generator_fake_output = discriminator(fake_images)
+-                    gan_loss = criterion_gan(
+-                        generator_fake_output, torch.ones_like(generator_fake_output).cuda())
++                    generator_fake_output = critic(fake_images)
++                    gan_loss = -torch.mean(generator_fake_output)
+                     total_val_gan_loss += gan_loss
+ 
+-                    real_output = discriminator(output_batch)
+-                    fake_output = discriminator(fake_images.detach())
++                    real_output = critic(output_batch)
++                    fake_output = critic(fake_images.detach())
+ 
+                     # Combine losses for Generator
+                     generator_loss = content_loss + gan_loss
+                     total_val_generator_loss += generator_loss
+ 
+-                    # Discriminator loss
+-                    real_loss = criterion_gan(
+-                        real_output, torch.ones_like(real_output).cuda())
+-                    fake_loss = criterion_gan(
+-                        fake_output, torch.zeros_like(fake_output).cuda())
+-                    total_val_discriminator_loss = real_loss + fake_loss
++                    # Critic loss
++                    real_loss = -torch.mean(real_output)
++                    fake_loss = -torch.mean(fake_output)
++                    total_val_critic_loss = real_loss + fake_loss
++
++                    # Calculate Precision, Recall, and F1 Score metrics
++                    true_positives = (fake_output < 0).sum().item()  # Counting how many fake images were correctly identified
++                    false_positives = (real_output < 0).sum().item() # Counting how many real images were incorrectly identified as fake
++                    false_negatives = (fake_output > 0).sum().item() # Counting how many fake images were incorrectly identified as real
++
++                    total_true_positives += true_positives
++                    total_false_positives += false_positives
++                    total_false_negatives += false_negatives
++                    total_val_fid += self.__calculate_fid(output_batch, fake_images)
+ 
+                     total_val_batches += 1
+ 
+                 avg_val_content_loss = total_val_content_loss / total_val_batches
+                 avg_val_gan_loss = total_val_gan_loss / total_val_batches
+                 avg_val_generator_loss = total_val_generator_loss / total_val_batches
+-                avg_val_discriminator_loss = total_val_discriminator_loss / total_val_batches
++                avg_val_critic_loss = total_val_critic_loss / total_val_batches
++
++                val_precision = total_true_positives / (total_true_positives + total_false_positives) if total_true_positives + total_false_positives > 0 else 0
++                val_recall = total_true_positives / (total_true_positives + total_false_negatives) if total_true_positives + total_false_negatives > 0 else 0
++                val_f1_score = 2 * (val_precision * val_recall) / (val_precision + val_recall) if val_precision + val_recall > 0 else 0
++                val_fid = total_val_fid / total_val_batches
+ 
+                 wandb.log({"train": {"Real images loss": avg_real_loss,
+                                      "Fake images loss": avg_fake_loss,
+-                                     "Discriminator loss": avg_discriminator_loss,
++                                     "Critic loss": avg_critic_loss,
+                                      "Content loss": avg_content_loss,
+                                      "GAN loss": avg_gan_loss,
+                                      "Generator loss": avg_generator_loss,
+-                                     "Loss": avg_loss},
++                                     "Loss": avg_loss,
++                                     "Precision": precision,
++                                     "Recall": recall,
++                                     "F1 score": f1_score,
++                                     "FID": fid},
+                            "validation": {"Content loss": avg_val_content_loss,
+                                           "GAN loss": avg_val_gan_loss,
+                                           "Generator loss": avg_val_generator_loss,
+-                                          "Discriminator loss": avg_val_discriminator_loss}})
+-
+-                train_discriminator = bool(avg_gan_loss < 1 or avg_discriminator_loss > 1)
++                                          "Critic loss": avg_val_critic_loss,
++                                          "Precision": val_precision,
++                                          "Recall": val_recall,
++                                          "F1 score": val_f1_score,
++                                          "FID": val_fid}})
+ 
+             path_to_save = os.path.join(models_path, f'e{epoch}')
+             try:
+@@ -304,9 +372,9 @@ class CNN:
+                 os.makedirs(path_to_save)
+ 
+             torch.save(generator.state_dict(), os.path.join(
+-                path_to_save, f'generator_{avg_generator_loss:4f}.pth'))
+-            torch.save(discriminator.state_dict(), os.path.join(
+-                path_to_save, f'discriminator_{avg_discriminator_loss:4f}.pth'))
++                path_to_save, f'generator_{avg_generator_loss}.pth'))
++            torch.save(critic.state_dict(), os.path.join(
++                path_to_save, f'critic_{avg_critic_loss}.pth'))
+ 
+     def run(self, input_path: str, output_path: str):
+         """Just a test..."""
+@@ -351,6 +419,6 @@ class CNN:
+ 
+         # simulate training
+         self.__train(f'{dimensions}_b{batch_size}_lr{learning_rate}',
+-                     train_set, validation_set, epochs, learning_rate)
++                     train_set, validation_set, epochs, learning_rate, 54)
+ 
+         wandb.finish()
