@@ -32,11 +32,11 @@ if __name__ == '__main__':
 
     # augment_datasets(2)
 
-    test = CNN()
-    test.run(
-        os.path.join("..", "data", "output",
-                     "augmented", "original", "8x8"),
-        os.path.join("..", "data", "output", "augmented", "x32", "16x16"))
+    network = CNN()
+    network.run(
+       os.path.join("..", "data", "output",
+                    "augmented", "original", "8x8"),
+       os.path.join("..", "data", "output", "augmented", "x32", "16x16"))
 
     # test.generate_image(
     #     os.path.join(
