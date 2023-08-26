@@ -106,7 +106,8 @@ class CNN:
         criterion = nn.BCELoss()
         l1_lambda = 100
 
-        for epoch in range(num_of_epochs):
+        training_start = finetune_from_epoch + 1
+        for epoch in range(training_start, num_of_epochs + training_start):
             total_train_real_loss = 0.0
             total_train_fake_loss = 0.0
             total_train_gan_loss = 0.0
@@ -154,10 +155,10 @@ class CNN:
                     gan_batch = generator(input_batch)
 
                     gan_data = torch.cat([input_batch, gan_batch], dim=1)
-                    prediction = discriminator(gan_data)
+                    prediction = discriminator(gan_data).detach()
                     labels = torch.ones(size=prediction.shape, dtype=torch.float).cuda()
 
-                    gan_loss = criterion(prediction, labels) + l1_lambda * torch.abs(gan_batch - output_batch).sum()
+                    gan_loss = criterion(prediction, labels) + l1_lambda * torch.mean(torch.abs(gan_batch - output_batch))
                     total_train_gan_loss += gan_loss
 
                     gan_loss.backward()
@@ -174,9 +175,10 @@ class CNN:
                 total_val_fake_loss = 0.0
                 total_val_gan_loss = 0.0
 
-                total_val_batches = 0
-
-                for (input_batch, output_batch) in valid_set:
+                for (input_batch, output_batch) in tqdm(
+                    valid_set,
+                    unit="batch",
+                    desc=f'validation epoch {epoch}'):
                     input_batch = input_batch.cuda()
                     output_batch = output_batch.cuda()
 
@@ -190,7 +192,7 @@ class CNN:
                     total_val_real_loss += real_loss
 
                     # Fake Images
-                    gan_batch = generator(input_batch).detach()
+                    gan_batch = generator(input_batch)
 
                     fake_data = torch.cat([gan_batch, output_batch], dim=1)
                     prediction = discriminator(fake_data)
@@ -200,14 +202,14 @@ class CNN:
                     total_val_fake_loss += fake_loss
 
                     # GAN validation
+                    gan_batch = generator(input_batch)
+
                     gan_data = torch.cat([input_batch, gan_batch], dim=1)
                     prediction = discriminator(gan_data)
                     labels = torch.ones(size=prediction.shape, dtype=torch.float).cuda()
 
-                    gan_loss = criterion(prediction, labels) + l1_lambda * torch.abs(gan_batch - output_batch).sum()
+                    gan_loss = criterion(prediction, labels) + l1_lambda * torch.mean(torch.abs(gan_batch - output_batch))
                     total_val_gan_loss += gan_loss
-
-                    total_val_batches += 1
 
             generator.train()
             discriminator.train()
@@ -246,10 +248,11 @@ class CNN:
                 shutil.rmtree(path_to_save)
                 os.makedirs(path_to_save)
 
-            torch.save(generator.state_dict(), os.path.join(
-                path_to_save, f'generator_{avg_val_gan_loss:4f}.pth'))
-            torch.save(discriminator.state_dict(), os.path.join(
-                path_to_save, f'discriminator_{avg_val_dicriminator_loss:4f}.pth'))
+            if epoch % 5 == 0 or epoch == num_of_epochs - 1:
+                torch.save(generator.state_dict(), os.path.join(
+                    path_to_save, f'generator_{avg_val_gan_loss:4f}.pth'))
+                torch.save(discriminator.state_dict(), os.path.join(
+                    path_to_save, f'discriminator_{avg_val_dicriminator_loss:4f}.pth'))
 
     def run(self, input_path: str, output_path: str, finetune_from_epoch: int = -1):
         """Just a test..."""
