@@ -1,4 +1,12 @@
-"""Provides CNN utils made for training neural network."""
+"""
+This module provides classes and methods for training and 
+evaluating image translation models using PyTorch and WANDB.
+
+Classes:
+    - ImageLoaderDataset: A PyTorch dataset for loading pairs of 
+    input and output images from specified directories.
+    - CNN: Trains neural networks and evaluates them.
+"""
 import os
 import shutil
 import sys
@@ -13,6 +21,20 @@ import network
 import wandb
 
 class ImageLoaderDataset(Dataset):
+    """
+    A PyTorch dataset for loading pairs of input and output images from specified directories.
+
+    Args:
+        input_root_dir (str): The root directory containing input images.
+        output_root_dir (str): The root directory containing corresponding output images.
+        transform (callable, optional): A function/transform to apply to the images.
+
+    Attributes:
+        input_root_dir (str): The root directory containing input images.
+        output_root_dir (str): The root directory containing corresponding output images.
+        transform (callable, optional): A function/transform to apply to the images.
+        image_paths (list of tuple): A list of tuples containing input and output image file paths.
+    """
     def __init__(self, input_root_dir, output_root_dir, transform=None):
         self.input_root_dir = input_root_dir
         self.output_root_dir = output_root_dir
@@ -39,8 +61,14 @@ class ImageLoaderDataset(Dataset):
 
 
 class CNN:
-    """Trains neural networks and evaluates them."""
+    """
+    The CNN (Convolutional Neural Network) class for training and 
+    evaluating image translation models.
 
+    This class provides methods for loading data, training the model, 
+    and running the training process. It utilizes
+    WANDB for tracking and visualization of training progress.
+    """
     def __load_data(self, input_path: str, output_path: str,
                     batch_size: int, validation_split: float = 0.2, test_split: float = 0.1):
         print(f'Input dataset: {input_path}')
@@ -99,8 +127,8 @@ class CNN:
                     discriminator.load_state_dict(torch.load(model_path))
 
         # Optimizers
-        optimizer_G = optim.Adam(generator.parameters(), lr=learning_rate, betas=(0.5, 0.999))
-        optimizer_D = optim.Adam(discriminator.parameters(), lr=learning_rate, betas=(0.5, 0.999))
+        optimizer_g = optim.Adam(generator.parameters(), lr=learning_rate, betas=(0.5, 0.999))
+        optimizer_d = optim.Adam(discriminator.parameters(), lr=learning_rate, betas=(0.5, 0.999))
 
         # Losses
         criterion = nn.BCELoss()
@@ -124,7 +152,7 @@ class CNN:
                 output_batch = output_batch.cuda()
 
                 # Train discriminator
-                optimizer_D.zero_grad()
+                optimizer_d.zero_grad()
 
                 # Real Images
                 real_data = torch.cat([input_batch, output_batch], dim=1)
@@ -146,11 +174,11 @@ class CNN:
                 total_train_fake_loss += fake_loss
                 fake_loss.backward()
 
-                optimizer_D.step()
+                optimizer_d.step()
 
                 # Train Generator
                 for _ in range(2):
-                    optimizer_G.zero_grad()
+                    optimizer_g.zero_grad()
 
                     gan_batch = generator(input_batch)
 
@@ -162,7 +190,7 @@ class CNN:
                     total_train_gan_loss += gan_loss
 
                     gan_loss.backward()
-                    optimizer_G.step()
+                    optimizer_g.step()
 
                 total_batches += 1
 
@@ -255,14 +283,20 @@ class CNN:
                     path_to_save, f'discriminator_{avg_val_dicriminator_loss:4f}.pth'))
 
     def run(self, input_path: str, output_path: str, finetune_from_epoch: int = -1):
-        """Just a test..."""
+        """
+        Run the image translation model training and logging process.
 
-        # SGD performs the best on 0.1
-        # Adam on 0.001
+        Args:
+            input_path (str): The directory path containing input images.
+            output_path (str): The directory path containing corresponding output images.
+            finetune_from_epoch (int, optional): The epoch from which to fine-tune training.
+                Default is `-1`, which means starting a new training session.
+
+        This method initializes a new training run using WANDB for tracking and visualization.
+        It sets up hyperparameters, loads data, and starts training the image translation model.
+        """
+
         learning_rate = 0.0002
-
-        # SGD on 16
-        # Adam on ???
         batch_size = 64
         epochs = 100
 
