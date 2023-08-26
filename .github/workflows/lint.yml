@@ -10,6 +10,7 @@ jobs:
               run: pip install -r requirements.txt
             - name: Lint
               uses: gabriel-milan/action-pylint@v1
+              args: "--generated-members=numpy.* ,torch.*"
               with:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
                   path: "./src/*.py"
