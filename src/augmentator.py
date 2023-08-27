@@ -159,7 +159,7 @@ class Utils:
         self.output_directory = Path(output_dir)
         os.makedirs(self.output_directory, exist_ok=True)
 
-    def __batch_process(self, data: tuple[Callable, List[str], tuple]) -> None:
+    def _batch_process(self, data: tuple[Callable, List[str], tuple]) -> None:
         function, file_batch, *args = data
         for file in file_batch:
             function(file, *args)
@@ -208,7 +208,7 @@ class Utils:
                     total=len(file_batches),
                     desc=function.__name__,
                     unit="batch") as pbar:
-                for _ in pool.imap_unordered(self.__batch_process,
+                for _ in pool.imap_unordered(self._batch_process,
                                              [(function, file_batch, *args
                                                ) for file_batch in file_batches]):
                     pbar.update(1)
