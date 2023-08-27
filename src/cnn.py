@@ -269,14 +269,14 @@ class CNN:
                                       "GAN loss": avg_val_gan_loss,
                                       "Loss": avg_val_loss}})
 
-            path_to_save = os.path.join(models_path, f'e{epoch}')
-            try:
-                os.makedirs(path_to_save)
-            except OSError:
-                shutil.rmtree(path_to_save)
-                os.makedirs(path_to_save)
-
             if epoch % 5 == 0 or epoch == num_of_epochs - 1:
+                path_to_save = os.path.join(models_path, f'e{epoch}')
+                try:
+                    os.makedirs(path_to_save)
+                except OSError:
+                    shutil.rmtree(path_to_save)
+                    os.makedirs(path_to_save)
+
                 torch.save(generator.state_dict(), os.path.join(
                     path_to_save, f'generator_{avg_val_gan_loss:4f}.pth'))
                 torch.save(discriminator.state_dict(), os.path.join(
