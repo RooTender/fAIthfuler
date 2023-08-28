@@ -103,7 +103,7 @@ class CNN:
         return train_loader
 
     def __train(self, dir_for_models: str, train_set: DataLoader,
-                num_of_epochs: int, learning_rate: float, finetune_from_epoch: int = -1):
+                learning_rate: float, num_of_epochs: int = -1, finetune_from_epoch: int = -1):
         models_path = os.path.join('..', 'models', dir_for_models)
 
         # Initialize Generator and Discriminator
@@ -130,6 +130,9 @@ class CNN:
         l1_lambda = 100
 
         training_start = finetune_from_epoch + 1
+        if num_of_epochs == -1:
+            num_of_epochs = 2147483647 # python doesn't have 'max' value so it's theoretical max
+
         for epoch in range(training_start, training_start + num_of_epochs):
             total_real_loss = 0.0
             total_fake_loss = 0.0
@@ -241,8 +244,8 @@ class CNN:
         """
 
         learning_rate = 0.0002
-        batch_size = 64
-        epochs = 100
+        batch_size = 1
+        epochs = -1
 
         dimensions = os.path.basename(os.path.normpath(self.input_path))
 
@@ -272,7 +275,7 @@ class CNN:
 
         # simulate training
         self.__train(f'{dimensions}_b{batch_size}_lr{learning_rate}',
-                     train_set, epochs, learning_rate, finetune_from_epoch)
+                     train_set, learning_rate, epochs, finetune_from_epoch)
 
         wandb.finish()
 
