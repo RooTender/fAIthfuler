@@ -195,7 +195,7 @@ class CNN:
                         size=prediction.shape, dtype=torch.float).cuda()
 
                     gan_loss = criterion(
-                        prediction, labels) + l1_lambda * torch.mean(torch.abs(gan_batch - output_batch))
+                        prediction, labels) + l1_lambda * torch.abs(gan_batch - output_batch).sum()
                     total_gan_loss += gan_loss
 
                     gan_loss.backward()
