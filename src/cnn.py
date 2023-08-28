@@ -8,17 +8,19 @@ Classes:
     - CNN: Trains neural networks and evaluates them.
 """
 import os
+import random
 import shutil
 import sys
+import matplotlib.pyplot as plt
 import torch
 from torch import nn, optim
-from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler
+from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
-import numpy as np
 from PIL import Image
 from tqdm import tqdm
 import network
 import wandb
+
 
 class ImageLoaderDataset(Dataset):
     """
@@ -35,6 +37,7 @@ class ImageLoaderDataset(Dataset):
         transform (callable, optional): A function/transform to apply to the images.
         image_paths (list of tuple): A list of tuples containing input and output image file paths.
     """
+
     def __init__(self, input_root_dir, output_root_dir, transform=None):
         self.input_root_dir = input_root_dir
         self.output_root_dir = output_root_dir
@@ -51,7 +54,8 @@ class ImageLoaderDataset(Dataset):
         input_image = Image.open(input_image_path)
         output_image = Image.open(output_image_path)
 
-        input_image = input_image.resize(output_image.size, Image.Resampling.NEAREST)
+        input_image = input_image.resize(
+            output_image.size, Image.Resampling.NEAREST)
 
         if self.transform:
             input_image = self.transform(input_image)
@@ -69,10 +73,21 @@ class CNN:
     and running the training process. It utilizes
     WANDB for tracking and visualization of training progress.
     """
-    def __load_data(self, input_path: str, output_path: str,
-                    batch_size: int, validation_split: float = 0.2, test_split: float = 0.1):
-        print(f'Input dataset: {input_path}')
-        print(f'Output dataset: {output_path}')
+
+    def __init__(self, input_path: str, output_path: str):
+        """
+        Initialize the CNN object with input and output paths for data.
+
+        Args:
+            input_path (str): Path to the directory containing input images.
+            output_path (str): Path to the directory containing corresponding ground truth images.
+        """
+        self.input_path = input_path
+        self.output_path = output_path
+
+    def __load_data(self, batch_size: int):
+        print(f'Input dataset: {self.input_path}')
+        print(f'Output dataset: {self.output_path}')
         print('Reading datasets...')
 
         transformator = transforms.Compose([
@@ -80,37 +95,14 @@ class CNN:
         ])
 
         input_data = ImageLoaderDataset(
-            input_path, output_path, transform=transformator)
-
-        # Splitting the dataset into training, validation, and test sets
-        num_train = len(input_data)
-        indices = list(range(num_train))
-
-        v_split = int(np.floor(validation_split * num_train))
-        t_split = int(np.floor(test_split * num_train))
-
-        rng = np.random.default_rng(seed=123)
-        rng.shuffle(indices)
-
-        test_idx, val_idx, train_idx = indices[:t_split], indices[t_split:t_split+v_split], indices[t_split+v_split:]
-
-        train_sampler = SubsetRandomSampler(train_idx)
-        valid_sampler = SubsetRandomSampler(val_idx)
-        test_sampler = SubsetRandomSampler(test_idx)
+            self.input_path, self.output_path, transform=transformator)
 
         train_loader = DataLoader(input_data, batch_size=batch_size,
-                                sampler=train_sampler, pin_memory=True, num_workers=4)
+                                  shuffle=True, pin_memory=True, num_workers=4)
 
-        valid_loader = DataLoader(input_data, batch_size=batch_size,
-                                sampler=test_sampler, pin_memory=True, num_workers=4)
+        return train_loader
 
-        test_loader = DataLoader(input_data, batch_size=batch_size,
-                                sampler=valid_sampler, pin_memory=True, num_workers=4)
-
-        return train_loader, valid_loader, test_loader
-
-    def __train(self, dir_for_models: str,
-                train_set: DataLoader, valid_set: DataLoader,
+    def __train(self, dir_for_models: str, train_set: DataLoader,
                 num_of_epochs: int, learning_rate: float, finetune_from_epoch: int = -1):
         models_path = os.path.join('..', 'models', dir_for_models)
 
@@ -120,27 +112,35 @@ class CNN:
 
         if finetune_from_epoch >= 0:
             for model_name in os.listdir(os.path.join(models_path, f'e{finetune_from_epoch}')):
-                model_path = os.path.join(models_path, f'e{finetune_from_epoch}', model_name)
+                model_path = os.path.join(
+                    models_path, f'e{finetune_from_epoch}', model_name)
                 if "generator" in model_name:
                     generator.load_state_dict(torch.load(model_path))
                 else:
                     discriminator.load_state_dict(torch.load(model_path))
 
         # Optimizers
-        optimizer_g = optim.Adam(generator.parameters(), lr=learning_rate, betas=(0.5, 0.999))
-        optimizer_d = optim.Adam(discriminator.parameters(), lr=learning_rate, betas=(0.5, 0.999))
+        optimizer_g = optim.Adam(
+            generator.parameters(), lr=learning_rate, betas=(0.99, 0.999))
+        optimizer_d = optim.Adam(
+            discriminator.parameters(), lr=learning_rate, betas=(0.99, 0.999))
 
         # Losses
         criterion = nn.BCELoss()
         l1_lambda = 100
 
         training_start = finetune_from_epoch + 1
-        for epoch in range(training_start, num_of_epochs + training_start):
-            total_train_real_loss = 0.0
-            total_train_fake_loss = 0.0
-            total_train_gan_loss = 0.0
+        for epoch in range(training_start, training_start + num_of_epochs):
+            total_real_loss = 0.0
+            total_fake_loss = 0.0
+            total_gan_loss = 0.0
 
             total_batches = 0
+
+            if epoch < 200:
+                l1_lambda = 100
+            else:
+                l1_lambda = 50
 
             # Training loop
             for (input_batch, output_batch) in tqdm(
@@ -157,10 +157,12 @@ class CNN:
                 # Real Images
                 real_data = torch.cat([input_batch, output_batch], dim=1)
                 prediction = discriminator(real_data)
-                labels = torch.ones(size=prediction.shape, dtype=torch.float).cuda()
+                labels = torch.ones(size=prediction.shape,
+                                    dtype=torch.float).cuda()
 
-                real_loss = 0.5 * criterion(prediction, labels)  # slow down learning
-                total_train_real_loss += real_loss
+                # slow down learning
+                real_loss = 0.5 * criterion(prediction, labels)
+                total_real_loss += real_loss
                 real_loss.backward()
 
                 # Fake Images
@@ -168,10 +170,12 @@ class CNN:
 
                 fake_data = torch.cat([gan_batch, output_batch], dim=1)
                 prediction = discriminator(fake_data)
-                labels = torch.zeros(size=prediction.shape, dtype=torch.float).cuda()
+                labels = torch.zeros(size=prediction.shape,
+                                     dtype=torch.float).cuda()
 
-                fake_loss = 0.5 * criterion(prediction, labels)  # slow down learning
-                total_train_fake_loss += fake_loss
+                # slow down learning
+                fake_loss = 0.5 * criterion(prediction, labels)
+                total_fake_loss += fake_loss
                 fake_loss.backward()
 
                 optimizer_d.step()
@@ -184,92 +188,34 @@ class CNN:
 
                     gan_data = torch.cat([input_batch, gan_batch], dim=1)
                     prediction = discriminator(gan_data).detach()
-                    labels = torch.ones(size=prediction.shape, dtype=torch.float).cuda()
+                    labels = torch.ones(
+                        size=prediction.shape, dtype=torch.float).cuda()
 
-                    gan_loss = criterion(prediction, labels) + l1_lambda * torch.mean(torch.abs(gan_batch - output_batch))
-                    total_train_gan_loss += gan_loss
+                    gan_loss = criterion(
+                        prediction, labels) + l1_lambda * torch.mean(torch.abs(gan_batch - output_batch))
+                    total_gan_loss += gan_loss
 
                     gan_loss.backward()
                     optimizer_g.step()
 
                 total_batches += 1
 
-            # Validation loop
-            generator.eval()
-            discriminator.eval()
-
-            with torch.no_grad():
-                total_val_real_loss = 0.0
-                total_val_fake_loss = 0.0
-                total_val_gan_loss = 0.0
-
-                for (input_batch, output_batch) in tqdm(
-                    valid_set,
-                    unit="batch",
-                    desc=f'validation epoch {epoch}'):
-                    input_batch = input_batch.cuda()
-                    output_batch = output_batch.cuda()
-
-                    # Discriminator validation
-                    # Real Images
-                    real_data = torch.cat([input_batch, output_batch], dim=1)
-                    prediction = discriminator(real_data)
-                    labels = torch.ones(size=prediction.shape, dtype=torch.float).cuda()
-
-                    real_loss = 0.5 * criterion(prediction, labels)  # slow down learning
-                    total_val_real_loss += real_loss
-
-                    # Fake Images
-                    gan_batch = generator(input_batch)
-
-                    fake_data = torch.cat([gan_batch, output_batch], dim=1)
-                    prediction = discriminator(fake_data)
-                    labels = torch.zeros(size=prediction.shape, dtype=torch.float).cuda()
-
-                    fake_loss = 0.5 * criterion(prediction, labels)  # slow down learning
-                    total_val_fake_loss += fake_loss
-
-                    # GAN validation
-                    gan_batch = generator(input_batch)
-
-                    gan_data = torch.cat([input_batch, gan_batch], dim=1)
-                    prediction = discriminator(gan_data)
-                    labels = torch.ones(size=prediction.shape, dtype=torch.float).cuda()
-
-                    gan_loss = criterion(prediction, labels) + l1_lambda * torch.mean(torch.abs(gan_batch - output_batch))
-                    total_val_gan_loss += gan_loss
-
-            generator.train()
-            discriminator.train()
-
             # Log metrics
-            # Train...
-            avg_train_real_loss = total_train_real_loss / total_batches
-            avg_train_fake_loss = total_train_fake_loss / total_batches
-            avg_train_dicriminator_loss = (avg_train_real_loss + avg_train_fake_loss) / 2
-            avg_train_gan_loss = total_train_gan_loss / total_batches
-            avg_train_loss = (avg_train_gan_loss + avg_train_dicriminator_loss) / 2
+            avg_real_loss = total_real_loss / total_batches
+            avg_fake_loss = total_fake_loss / total_batches
+            avg_dicriminator_loss = (
+                avg_real_loss + avg_fake_loss) / 2
+            avg_gan_loss = total_gan_loss / total_batches
+            avg_loss = (avg_gan_loss +
+                        avg_dicriminator_loss) / 2
 
-            # Validation...
-            avg_val_real_loss = total_val_real_loss / total_batches
-            avg_val_fake_loss = total_val_fake_loss / total_batches
-            avg_val_dicriminator_loss = (avg_val_real_loss + avg_val_fake_loss) / 2
-            avg_val_gan_loss = total_val_gan_loss / total_batches
-            avg_val_loss = (avg_val_gan_loss + avg_val_dicriminator_loss) / 2
+            wandb.log({"Discriminator real images loss": avg_real_loss,
+                       "Discriminator fake images loss": avg_fake_loss,
+                       "Discriminator loss": avg_dicriminator_loss,
+                       "GAN loss": avg_gan_loss,
+                       "Loss": avg_loss})
 
-            wandb.log({"train": {"Discriminator real images loss": avg_train_real_loss,
-                                 "Discriminator fake images loss": avg_train_fake_loss,
-                                 "Discriminator loss": avg_train_dicriminator_loss,
-                                 "GAN loss": avg_train_gan_loss,
-                                 "Loss": avg_train_loss},
-
-                       "validation": {"Discriminator real images loss": avg_val_real_loss,
-                                      "Discriminator fake images loss": avg_val_fake_loss,
-                                      "Discriminator loss": avg_val_dicriminator_loss,
-                                      "GAN loss": avg_val_gan_loss,
-                                      "Loss": avg_val_loss}})
-
-            if epoch % 5 == 0 or epoch == num_of_epochs - 1:
+            if epoch % 5 == 0 or epoch == training_start + num_of_epochs - 1:
                 path_to_save = os.path.join(models_path, f'e{epoch}')
                 try:
                     os.makedirs(path_to_save)
@@ -278,17 +224,15 @@ class CNN:
                     os.makedirs(path_to_save)
 
                 torch.save(generator.state_dict(), os.path.join(
-                    path_to_save, f'generator_{avg_val_gan_loss:4f}.pth'))
+                    path_to_save, f'generator_{avg_gan_loss:4f}.pth'))
                 torch.save(discriminator.state_dict(), os.path.join(
-                    path_to_save, f'discriminator_{avg_val_dicriminator_loss:4f}.pth'))
+                    path_to_save, f'discriminator_{avg_dicriminator_loss:4f}.pth'))
 
-    def run(self, input_path: str, output_path: str, finetune_from_epoch: int = -1):
+    def run(self, finetune_from_epoch: int = -1):
         """
         Run the image translation model training and logging process.
 
         Args:
-            input_path (str): The directory path containing input images.
-            output_path (str): The directory path containing corresponding output images.
             finetune_from_epoch (int, optional): The epoch from which to fine-tune training.
                 Default is `-1`, which means starting a new training session.
 
@@ -300,11 +244,11 @@ class CNN:
         batch_size = 64
         epochs = 100
 
-        dimensions = os.path.basename(os.path.normpath(input_path))
+        dimensions = os.path.basename(os.path.normpath(self.input_path))
 
         # start a new wandb run to track this script
         wandb.init(
-            resume = (finetune_from_epoch >= 0),
+            resume=(finetune_from_epoch >= 0),
             # set the wandb project where this run will be logged
             project="FAIthfuler",
             entity="rootender",
@@ -324,14 +268,73 @@ class CNN:
         else:
             print("CUDA detected! Initializing...")
 
-        train_set, validation_set, _ = self.__load_data(
-            input_path=input_path,
-            output_path=output_path,
-            batch_size=batch_size
-        )
+        train_set = self.__load_data(batch_size)
 
         # simulate training
         self.__train(f'{dimensions}_b{batch_size}_lr{learning_rate}',
-                     train_set, validation_set, epochs, learning_rate, finetune_from_epoch)
+                     train_set, epochs, learning_rate, finetune_from_epoch)
 
         wandb.finish()
+
+    def test(self, model_path: str, images_to_test: int = 9):
+        """
+        Test and visualize the performance of a generator model on input images.
+
+        Args:
+            model_path (str): Path to the trained generator model's checkpoint.
+            images_to_test (int, optional): Number of images to test and visualize. Default is `9`.
+        """
+
+        # Select 9 common random files between input_files and output_files
+        selected_files = random.sample(
+            os.listdir(self.input_path), images_to_test)
+
+        # Load the model
+        generator = network.Generator().cuda()
+        generator.load_state_dict(torch.load(model_path))
+        generator.eval()
+
+        # Initialize matplotlib
+        _, axes = plt.subplots(len(selected_files), 4, figsize=(20, 45))
+        plt.subplots_adjust(hspace=0.4, wspace=0.3)
+        columns = ['Filename', 'Input', 'Ground Truth', 'Generated']
+
+        # Populate each row
+        for i, ax_row in enumerate(axes):
+            ax_filename, ax_input, ax_ground, ax_generated = ax_row
+
+            # Display filename
+            ax_filename.axis('off')
+            ax_filename.text(
+                0.5, 0.5, selected_files[i], horizontalalignment='center', verticalalignment='center')
+
+            # Load and display the input image
+            input_image_path = os.path.join(self.input_path, selected_files[i])
+            input_image = Image.open(input_image_path)
+            ax_input.imshow(input_image)
+
+            # Load and display the ground truth
+            ground_image_path = os.path.join(
+                self.output_path, selected_files[i])
+            ground_image = Image.open(ground_image_path)
+            ax_ground.imshow(ground_image)
+
+            # Preprocess the input image and run it through the model
+            input_image = input_image.resize(
+                ground_image.size, Image.Resampling.NEAREST)
+            transform = transforms.ToTensor()
+            input_tensor = transform(input_image).unsqueeze(
+                0).cuda()  # Add batch dimension and move to GPU
+            with torch.no_grad():
+                generated_tensor = generator(input_tensor)
+
+            # Convert tensor to PIL Image and display it
+            generated_image = transforms.ToPILImage()(generated_tensor.squeeze(0).cpu())
+            ax_generated.imshow(generated_image)
+
+        # Set column titles
+        for axes, column in zip(axes[0], columns):
+            axes.set_title(column)
+
+        # Show the plot
+        plt.show()
