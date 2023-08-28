@@ -223,20 +223,35 @@ class Utils:
                 f'Augmenting {os.path.basename(input_dir)} ({i}/{total_directories})')
 
             files = get_files(input_dir)
-            apply_method(techniques.mirror, files)
-            apply_method(techniques.flip, files)
-            apply_method(techniques.rotate, files)
+            if len(files) < goal:
+                apply_method(techniques.mirror, files)
+            else:
+                continue
 
-            # (x + x * (1 + 1 + 3)) * y^3 * 2 = goal
-            exponent = int(np.ceil(np.cbrt(goal / (12 * len(files)))))
+            if len(get_files(output_dir)) < goal:
+                apply_method(techniques.flip, files)
+            else:
+                continue
+
+            if len(get_files(output_dir)) < goal:
+                apply_method(techniques.rotate, files)
+            else:
+                continue
+
+            # (x + x * (1 + 1 + 3)) * y^3 = goal
+            exponent = int(np.cbrt(goal / (6 * len(files))))
             array_for_jittering = list(
                 np.around(np.linspace(0.5, 2, exponent), 2))
 
             files = get_files(output_dir)
-            apply_method(techniques.color_jitter, files, array_for_jittering)
+            if len(files) * (exponent ** 3) < goal:
+                apply_method(techniques.color_jitter, files, array_for_jittering)
+            else:
+                continue
 
             files = get_files(output_dir)
-            apply_method(techniques.invert, files)
+            if len(files) < goal:
+                apply_method(techniques.invert, files)
 
     def preprocess_data(self, input_dir: str):
         """
