@@ -14,6 +14,7 @@ import sys
 import matplotlib.pyplot as plt
 import torch
 from torch import nn, optim
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from PIL import Image
@@ -121,17 +122,26 @@ class CNN:
 
         # Optimizers
         optimizer_g = optim.Adam(
-            generator.parameters(), lr=learning_rate, betas=(0.99, 0.999))
+            generator.parameters(), lr=learning_rate, betas=(0.5, 0.999))
         optimizer_d = optim.Adam(
-            discriminator.parameters(), lr=learning_rate, betas=(0.99, 0.999))
+            discriminator.parameters(), lr=learning_rate, betas=(0.5, 0.999))
+
+        # Schedulers
+        scheduler_g = ReduceLROnPlateau(
+            optimizer_g, 'min', cooldown=20, patience=10, factor=0.5)
+
+        adam_plateau_count = 0
+        sgd_plateau_count = 0
+        last_lr = learning_rate
+        using_adam = True
 
         # Losses
         criterion = nn.BCELoss()
-        l1_lambda = 100
+        l1_lambda = 10
 
         training_start = finetune_from_epoch + 1
         if num_of_epochs == -1:
-            num_of_epochs = 2147483647 # python doesn't have 'max' value so it's theoretical max
+            num_of_epochs = 2147483647  # python doesn't have 'max' value so it's theoretical max
 
         for epoch in range(training_start, training_start + num_of_epochs):
             total_real_loss = 0.0
@@ -139,11 +149,6 @@ class CNN:
             total_gan_loss = 0.0
 
             total_batches = 0
-
-            if epoch < 200:
-                l1_lambda = 100
-            else:
-                l1_lambda = 50
 
             # Training loop
             for (input_batch, output_batch) in tqdm(
@@ -201,6 +206,38 @@ class CNN:
                     gan_loss.backward()
                     optimizer_g.step()
 
+                    # Update scheduler
+                    scheduler_g.step(gan_loss)
+
+                    # If currently using Adam
+                    if using_adam:
+                        if optimizer_g.param_groups[0]['lr'] < last_lr:
+                            last_lr = optimizer_g.param_groups[0]['lr']
+                            adam_plateau_count += 1
+
+                        if adam_plateau_count >= 3:  # switch to SGD
+                            print("Switching to SGD with Momentum")
+                            optimizer_g = optim.SGD(
+                                generator.parameters(), lr=last_lr, momentum=0.9)
+
+                            using_adam = False  # Update flag
+                            adam_plateau_count = 0  # Reset Adam plateau counter
+
+                    # If currently using SGD
+                    else:
+                        # You can set a different threshold for SGD
+                        if optimizer_g.param_groups[0]['lr'] < last_lr:
+                            last_lr = optimizer_g.param_groups[0]['lr']
+                            sgd_plateau_count += 1
+
+                        if sgd_plateau_count >= 3:  # switch back to Adam
+                            print("Switching back to Adam")
+                            optimizer_g = optim.Adam(
+                                generator.parameters(), lr=last_lr, betas=(0.5, 0.999))
+
+                            using_adam = True  # Update flag
+                            sgd_plateau_count = 0  # Reset SGD plateau counter
+
                 total_batches += 1
 
             # Log metrics
@@ -244,7 +281,7 @@ class CNN:
         """
 
         learning_rate = 0.0002
-        batch_size = 1
+        batch_size = 64
         epochs = -1
 
         dimensions = os.path.basename(os.path.normpath(self.input_path))
