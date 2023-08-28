@@ -4,17 +4,13 @@
 		"**/data/*.png": true
 	},
 	"files.watcherExclude": {
-		"**/data/augmented": true,
-		"**/data/output/augmented": true
+		"**/data/output/augmented*/**": true
 	},
-	"python.analysis.exclude": ["**/data/augmented"],
 	"workbench.localHistory.exclude": {
-		"data/augmented": true,
-		"data/output/augmented": true
+		"**/data/output/augmented*/**": true
 	},
 	"files.exclude": {
-		"data/augmented/**": true,
-		"data/output/augmented/**": true
+		"**/data/output/augmented*/**": true
 	},
 	"pylint.args": ["--generated-members=numpy.* ,torch.*"]
 }
