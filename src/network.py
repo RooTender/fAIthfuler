@@ -21,8 +21,10 @@ class Generator(nn.Module):
     Attributes:
         encoder1 (nn.Conv2d): The first convolutional layer in the encoder.
         encoder2 (nn.Sequential): The second convolutional layer in the encoder.
+        encoder3 (nn.Sequential): ...
         decoder1 (nn.Sequential): The first convolutional layer in the decoder.
         decoder2 (nn.Sequential): The second convolutional layer in the decoder.
+        decoder3 (nn.Sequential): ...
     """
 
     def __init__(self):
@@ -44,23 +46,37 @@ class Generator(nn.Module):
                       stride=2, padding=1, bias=False),
         )
 
+        self.encoder4 = nn.Sequential(
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(256, 512, kernel_size=4,
+                      stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(512)
+        )
+
         # Decoder
         self.decoder1 = nn.Sequential(
             nn.ReLU(inplace=True),
-            nn.ConvTranspose2d(256, 128, kernel_size=4,
+            nn.ConvTranspose2d(512, 256, kernel_size=4,
                                stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(128),
+            nn.BatchNorm2d(256),
             nn.Dropout(0.5)
         )
 
         self.decoder2 = nn.Sequential(
+            nn.ReLU(inplace=True),
+            nn.ConvTranspose2d(256*2, 128, kernel_size=4,
+                               stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(128)
+        )
+
+        self.decoder3 = nn.Sequential(
             nn.ReLU(inplace=True),
             nn.ConvTranspose2d(128*2, 64, kernel_size=4,
                                stride=2, padding=1, bias=False),
             nn.BatchNorm2d(64)
         )
 
-        self.decoder3 = nn.Sequential(
+        self.decoder4 = nn.Sequential(
             nn.ReLU(inplace=True),
             nn.ConvTranspose2d(64*2, 4, kernel_size=4,
                                stride=2, padding=1, bias=False),
@@ -79,11 +95,13 @@ class Generator(nn.Module):
         """
         e1 = self.encoder1(image)
         e2 = self.encoder2(e1)
-        latent_space = self.encoder3(e2)
+        e3 = self.encoder3(e2)
+        latent_space = self.encoder4(e3)
 
-        d1 = torch.cat([self.decoder1(latent_space), e2], dim=1)
-        d2 = torch.cat([self.decoder2(d1), e1], dim=1)
-        out = self.decoder3(d2)
+        d1 = torch.cat([self.decoder1(latent_space), e3], dim=1)
+        d2 = torch.cat([self.decoder2(d1), e2], dim=1)
+        d3 = torch.cat([self.decoder3(d2), e1], dim=1)
+        out = self.decoder4(d3)
 
         return out
 
@@ -112,7 +130,13 @@ class Discriminator(nn.Module):
             nn.BatchNorm2d(256),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(256, 1, kernel_size=4, stride=1, padding=1, bias=False),
+            nn.Conv2d(256, 512, kernel_size=4,
+                      stride=1, padding=1, bias=False),
+            nn.BatchNorm2d(512),
+            nn.LeakyReLU(0.2, inplace=True),
+
+            nn.Conv2d(512, 1, kernel_size=4,
+                      stride=1, padding=1, bias=False),
             nn.Sigmoid()
         )
 
