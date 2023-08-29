@@ -128,7 +128,7 @@ class CNN:
 
         # Schedulers
         scheduler_g = ReduceLROnPlateau(
-            optimizer_g, 'min', cooldown=10, patience=5, factor=0.5)
+            optimizer_g, 'min', cooldown=2, patience=3, factor=0.5, threshold=0.025)
 
         plateau_count = 0
         last_lr = learning_rate
@@ -224,25 +224,32 @@ class CNN:
 
             # Update scheduler
             scheduler_g.step(avg_gan_loss)
-
-            if optimizer_g.param_groups[0]['lr'] < last_lr:
-                last_lr = optimizer_g.param_groups[0]['lr']
-                plateau_count += 1
-
+                
             # Switch optimizers on too much plateau warnings
             if plateau_count >= 3:
+
+                # multiply for the possibility of escaping local minima
+                last_lr *= 2
+
                 if using_adam:
-                    print("Switching to SGD with Momentum")
+                    print(f"Switching to SGD with Momentum with lr = {last_lr}")
                     optimizer_g = optim.SGD(
                         generator.parameters(), lr=last_lr, momentum=0.9)
                     using_adam = False
                 else:
-                    print("Switching back to Adam")
+                    print(f"Switching back to Adam with lr = {last_lr}")
                     optimizer_g = optim.Adam(
                         generator.parameters(), lr=last_lr, betas=(0.5, 0.999))
                     using_adam = True
 
+                scheduler_g = ReduceLROnPlateau(
+                    optimizer_g, 'min', cooldown=2, patience=3, factor=0.5, threshold=0.025)
                 plateau_count = 0
+
+            elif optimizer_g.param_groups[0]['lr'] < last_lr:
+                last_lr = optimizer_g.param_groups[0]['lr']
+                print(f"Learning rate set to: {last_lr}")
+                plateau_count += 1
 
             if epoch % 5 == 0 or epoch == training_start + num_of_epochs - 1:
                 path_to_save = os.path.join(models_path, f'e{epoch}')
@@ -269,7 +276,7 @@ class CNN:
         It sets up hyperparameters, loads data, and starts training the image translation model.
         """
 
-        learning_rate = 0.001
+        learning_rate = 0.01
         batch_size = 64
         epochs = -1
 
