@@ -128,10 +128,9 @@ class CNN:
 
         # Schedulers
         scheduler_g = ReduceLROnPlateau(
-            optimizer_g, 'min', cooldown=20, patience=10, factor=0.5)
+            optimizer_g, 'min', cooldown=10, patience=5, factor=0.5)
 
-        adam_plateau_count = 0
-        sgd_plateau_count = 0
+        plateau_count = 0
         last_lr = learning_rate
         using_adam = True
 
@@ -200,43 +199,11 @@ class CNN:
                         size=prediction.shape, dtype=torch.float).cuda()
 
                     gan_loss = criterion(
-                        prediction, labels) + l1_lambda * torch.abs(gan_batch - output_batch).sum()
+                        prediction, labels) + l1_lambda * torch.abs(gan_batch - output_batch).mean()
                     total_gan_loss += gan_loss
 
                     gan_loss.backward()
                     optimizer_g.step()
-
-                    # Update scheduler
-                    scheduler_g.step(gan_loss)
-
-                    # If currently using Adam
-                    if using_adam:
-                        if optimizer_g.param_groups[0]['lr'] < last_lr:
-                            last_lr = optimizer_g.param_groups[0]['lr']
-                            adam_plateau_count += 1
-
-                        if adam_plateau_count >= 3:  # switch to SGD
-                            print("Switching to SGD with Momentum")
-                            optimizer_g = optim.SGD(
-                                generator.parameters(), lr=last_lr, momentum=0.9)
-
-                            using_adam = False  # Update flag
-                            adam_plateau_count = 0  # Reset Adam plateau counter
-
-                    # If currently using SGD
-                    else:
-                        # You can set a different threshold for SGD
-                        if optimizer_g.param_groups[0]['lr'] < last_lr:
-                            last_lr = optimizer_g.param_groups[0]['lr']
-                            sgd_plateau_count += 1
-
-                        if sgd_plateau_count >= 3:  # switch back to Adam
-                            print("Switching back to Adam")
-                            optimizer_g = optim.Adam(
-                                generator.parameters(), lr=last_lr, betas=(0.5, 0.999))
-
-                            using_adam = True  # Update flag
-                            sgd_plateau_count = 0  # Reset SGD plateau counter
 
                 total_batches += 1
 
@@ -254,6 +221,28 @@ class CNN:
                        "Discriminator loss": avg_dicriminator_loss,
                        "GAN loss": avg_gan_loss,
                        "Loss": avg_loss})
+
+            # Update scheduler
+            scheduler_g.step(avg_gan_loss)
+
+            if optimizer_g.param_groups[0]['lr'] < last_lr:
+                last_lr = optimizer_g.param_groups[0]['lr']
+                plateau_count += 1
+
+            # Switch optimizers on too much plateau warnings
+            if plateau_count >= 3:
+                if using_adam:
+                    print("Switching to SGD with Momentum")
+                    optimizer_g = optim.SGD(
+                        generator.parameters(), lr=last_lr, momentum=0.9)
+                    using_adam = False
+                else:
+                    print("Switching back to Adam")
+                    optimizer_g = optim.Adam(
+                        generator.parameters(), lr=last_lr, betas=(0.5, 0.999))
+                    using_adam = True
+
+                plateau_count = 0
 
             if epoch % 5 == 0 or epoch == training_start + num_of_epochs - 1:
                 path_to_save = os.path.join(models_path, f'e{epoch}')
@@ -280,7 +269,7 @@ class CNN:
         It sets up hyperparameters, loads data, and starts training the image translation model.
         """
 
-        learning_rate = 0.0002
+        learning_rate = 0.001
         batch_size = 64
         epochs = -1
 
@@ -346,7 +335,8 @@ class CNN:
             # Display filename
             ax_filename.axis('off')
             ax_filename.text(
-                0.5, 0.5, selected_files[i], horizontalalignment='center', verticalalignment='center')
+                0.5, 0.5, selected_files[i],
+                horizontalalignment='center', verticalalignment='center')
 
             # Load and display the input image
             input_image_path = os.path.join(self.input_path, selected_files[i])
