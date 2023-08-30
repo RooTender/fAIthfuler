@@ -32,54 +32,40 @@ class Generator(nn.Module):
 
         # Encoder
         self.encoder1 = nn.Conv2d(
-            4, 64, kernel_size=4, stride=2, padding=1, bias=False)
+            4, 64, kernel_size=2, stride=2, padding=0, bias=False)
 
         self.encoder2 = nn.Sequential(
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1, bias=False),
+            nn.Conv2d(64, 128, kernel_size=2, stride=2, padding=0, bias=False),
             nn.BatchNorm2d(128)
         )
 
         self.encoder3 = nn.Sequential(
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(128, 256, kernel_size=4,
-                      stride=2, padding=1, bias=False),
-        )
-
-        self.encoder4 = nn.Sequential(
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(256, 512, kernel_size=4,
-                      stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(512)
+            nn.Conv2d(128, 256, kernel_size=2,
+                      stride=2, padding=0, bias=False),
         )
 
         # Decoder
         self.decoder1 = nn.Sequential(
             nn.ReLU(inplace=True),
-            nn.ConvTranspose2d(512, 256, kernel_size=4,
-                               stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(256),
+            nn.ConvTranspose2d(256, 128, kernel_size=2,
+                               stride=2, padding=0, bias=False),
+            nn.BatchNorm2d(128),
             nn.Dropout(0.5)
         )
 
         self.decoder2 = nn.Sequential(
             nn.ReLU(inplace=True),
-            nn.ConvTranspose2d(256*2, 128, kernel_size=4,
-                               stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(128)
+            nn.ConvTranspose2d(128*2, 64, kernel_size=2,
+                               stride=2, padding=0, bias=False),
+            nn.BatchNorm2d(64)
         )
 
         self.decoder3 = nn.Sequential(
             nn.ReLU(inplace=True),
-            nn.ConvTranspose2d(128*2, 64, kernel_size=4,
-                               stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(64)
-        )
-
-        self.decoder4 = nn.Sequential(
-            nn.ReLU(inplace=True),
-            nn.ConvTranspose2d(64*2, 4, kernel_size=4,
-                               stride=2, padding=1, bias=False),
+            nn.ConvTranspose2d(64*2, 4, kernel_size=2,
+                               stride=2, padding=0, bias=False),
             nn.Tanh()
         )
 
@@ -95,13 +81,11 @@ class Generator(nn.Module):
         """
         e1 = self.encoder1(image)
         e2 = self.encoder2(e1)
-        e3 = self.encoder3(e2)
-        latent_space = self.encoder4(e3)
+        latent_space = self.encoder3(e2)
 
-        d1 = torch.cat([self.decoder1(latent_space), e3], dim=1)
-        d2 = torch.cat([self.decoder2(d1), e2], dim=1)
-        d3 = torch.cat([self.decoder3(d2), e1], dim=1)
-        out = self.decoder4(d3)
+        d1 = torch.cat([self.decoder1(latent_space), e2], dim=1)
+        d2 = torch.cat([self.decoder2(d1), e1], dim=1)
+        out = self.decoder3(d2)
 
         return out
 
@@ -118,25 +102,19 @@ class Discriminator(nn.Module):
         super(Discriminator, self).__init__()
 
         self.structure = nn.Sequential(
-            nn.Conv2d(4*2, 64, kernel_size=4, stride=2, padding=1, bias=False),
+            nn.Conv2d(4*2, 64, kernel_size=2, stride=2, padding=0, bias=False),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1, bias=False),
+            nn.Conv2d(64, 128, kernel_size=2, stride=2, padding=0, bias=False),
             nn.BatchNorm2d(128),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(128, 256, kernel_size=4,
-                      stride=2, padding=1, bias=False),
+            nn.Conv2d(128, 256, kernel_size=2,
+                      stride=2, padding=0, bias=False),
             nn.BatchNorm2d(256),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(256, 512, kernel_size=4,
-                      stride=1, padding=1, bias=False),
-            nn.BatchNorm2d(512),
-            nn.LeakyReLU(0.2, inplace=True),
-
-            nn.Conv2d(512, 1, kernel_size=4,
-                      stride=1, padding=1, bias=False),
+            nn.Conv2d(256, 1, kernel_size=2, stride=1, padding=0, bias=False),
             nn.Sigmoid()
         )
 
