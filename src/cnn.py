@@ -122,11 +122,11 @@ class CNN:
         interpolates = (alpha * real_data + ((1 - alpha)
                         * generated_data)).requires_grad_(True)
 
-        # Let critic have it's opinion about it
+        # Let critic have own opinion about it
         opinion = critic(interpolates)
 
         # Create a tensor of ones for the fake samples
-        fake = torch.ones(real_data.shape).cuda()
+        fake = torch.ones(real_data.shape[0], 1, 1, 1).cuda()
 
         # Calculate gradients of the critic's evaluations with respect to the interpolated data
         gradients = autograd.grad(
@@ -216,7 +216,7 @@ class CNN:
                 optimizer_g.zero_grad()
 
                 generated_data = generator(input_batch)
-                generator_loss = -torch.mean(critic(generated_data).detach())
+                generator_loss = -torch.mean(critic(generated_data).detach()).requires_grad_(True)
 
                 total_gan_loss += generator_loss
 
