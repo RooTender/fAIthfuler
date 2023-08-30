@@ -104,45 +104,42 @@ class CNN:
         return train_loader
 
     def __train(self, dir_for_models: str, train_set: DataLoader,
-                learning_rate: float, num_of_epochs: int = -1, finetune_from_epoch: int = -1):
+                learning_rate: float, num_of_epochs: int = -1, finetune_models_path: str = ''):
         models_path = os.path.join('..', 'models', dir_for_models)
 
         # Initialize Generator and Discriminator
         generator = network.Generator().cuda()
         discriminator = network.Discriminator().cuda()
 
-        if finetune_from_epoch >= 0:
-            for model_name in os.listdir(os.path.join(models_path, f'e{finetune_from_epoch}')):
+        if finetune_models_path != '':
+            for model_name in os.listdir(finetune_models_path):
                 model_path = os.path.join(
-                    models_path, f'e{finetune_from_epoch}', model_name)
+                    finetune_models_path, model_name)
                 if "generator" in model_name:
                     generator.load_state_dict(torch.load(model_path))
                 else:
                     discriminator.load_state_dict(torch.load(model_path))
 
         # Optimizers
-        optimizer_g = optim.Adam(
-            generator.parameters(), lr=learning_rate, betas=(0.5, 0.999))
-        optimizer_d = optim.Adam(
-            discriminator.parameters(), lr=learning_rate, betas=(0.5, 0.999))
+        optimizer_g = optim.Adam(generator.parameters(), lr=learning_rate, betas=(0.5, 0.999))
+        optimizer_d = optim.Adam(discriminator.parameters(), lr=learning_rate, betas=(0.5, 0.999))
 
         # Schedulers
         scheduler_g = ReduceLROnPlateau(
-            optimizer_g, 'min', cooldown=2, patience=3, factor=0.5, threshold=0.025)
-
-        plateau_count = 0
-        last_lr = learning_rate
-        using_adam = True
+            optimizer_g, 'min', patience=10, factor=0.1, threshold=0.025)
+        scheduler_d = ReduceLROnPlateau(
+            optimizer_d, 'min', patience=5, factor=0.1, threshold=1e-8)
+        g_lr = learning_rate
+        d_lr = learning_rate
 
         # Losses
         criterion = nn.BCELoss()
-        l1_lambda = 10
+        l1_lambda = 2
 
-        training_start = finetune_from_epoch + 1
         if num_of_epochs == -1:
             num_of_epochs = 2147483647  # python doesn't have 'max' value so it's theoretical max
 
-        for epoch in range(training_start, training_start + num_of_epochs):
+        for epoch in range(num_of_epochs):
             total_real_loss = 0.0
             total_fake_loss = 0.0
             total_gan_loss = 0.0
@@ -188,7 +185,8 @@ class CNN:
                 optimizer_d.step()
 
                 # Train Generator
-                for _ in range(2):
+                train_loop = 2
+                for _ in range(train_loop):
                     optimizer_g.zero_grad()
 
                     gan_batch = generator(input_batch)
@@ -200,7 +198,7 @@ class CNN:
 
                     gan_loss = criterion(
                         prediction, labels) + l1_lambda * torch.abs(gan_batch - output_batch).mean()
-                    total_gan_loss += gan_loss
+                    total_gan_loss += gan_loss / train_loop
 
                     gan_loss.backward()
                     optimizer_g.step()
@@ -224,35 +222,17 @@ class CNN:
 
             # Update scheduler
             scheduler_g.step(avg_gan_loss)
-                
-            # Switch optimizers on too much plateau warnings
-            if plateau_count >= 3:
+            if optimizer_g.param_groups[0]['lr'] < g_lr:
+                g_lr = optimizer_g.param_groups[0]['lr']
+                print(f"Generator learning rate set to: {g_lr}")
 
-                # multiply for the possibility of escaping local minima
-                last_lr *= 2
+            scheduler_d.step(avg_dicriminator_loss)
+            if optimizer_d.param_groups[0]['lr'] < d_lr:
+                d_lr = optimizer_d.param_groups[0]['lr']
+                print(f"Discriminator learning rate set to: {d_lr}")
 
-                if using_adam:
-                    print(f"Switching to SGD with Momentum with lr = {last_lr}")
-                    optimizer_g = optim.SGD(
-                        generator.parameters(), lr=last_lr, momentum=0.9)
-                    using_adam = False
-                else:
-                    print(f"Switching back to Adam with lr = {last_lr}")
-                    optimizer_g = optim.Adam(
-                        generator.parameters(), lr=last_lr, betas=(0.5, 0.999))
-                    using_adam = True
-
-                scheduler_g = ReduceLROnPlateau(
-                    optimizer_g, 'min', cooldown=2, patience=3, factor=0.5, threshold=0.025)
-                plateau_count = 0
-
-            elif optimizer_g.param_groups[0]['lr'] < last_lr:
-                last_lr = optimizer_g.param_groups[0]['lr']
-                print(f"Learning rate set to: {last_lr}")
-                plateau_count += 1
-
-            if epoch % 5 == 0 or epoch == training_start + num_of_epochs - 1:
-                path_to_save = os.path.join(models_path, f'e{epoch}')
+            if epoch % 5 == 0 or epoch == num_of_epochs - 1:
+                path_to_save = os.path.join(models_path, f'e{epoch}_lr{g_lr}')
                 try:
                     os.makedirs(path_to_save)
                 except OSError:
@@ -264,7 +244,7 @@ class CNN:
                 torch.save(discriminator.state_dict(), os.path.join(
                     path_to_save, f'discriminator_{avg_dicriminator_loss:4f}.pth'))
 
-    def run(self, finetune_from_epoch: int = -1):
+    def run(self, finetune_model_path: str = '', wandb_id: str = ''):
         """
         Run the image translation model training and logging process.
 
@@ -276,15 +256,15 @@ class CNN:
         It sets up hyperparameters, loads data, and starts training the image translation model.
         """
 
-        learning_rate = 0.01
+        learning_rate = 0.002
         batch_size = 64
-        epochs = -1
+        epochs = 500
 
         dimensions = os.path.basename(os.path.normpath(self.input_path))
 
         # start a new wandb run to track this script
         wandb.init(
-            resume=(finetune_from_epoch >= 0),
+            resume=f'{wandb_id}',
             # set the wandb project where this run will be logged
             project="FAIthfuler",
             entity="rootender",
@@ -307,8 +287,8 @@ class CNN:
         train_set = self.__load_data(batch_size)
 
         # simulate training
-        self.__train(f'{dimensions}_b{batch_size}_lr{learning_rate}',
-                     train_set, learning_rate, epochs, finetune_from_epoch)
+        self.__train(f'{dimensions}_b{batch_size}',
+                     train_set, learning_rate, epochs, finetune_model_path)
 
         wandb.finish()
 

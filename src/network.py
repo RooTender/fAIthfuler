@@ -51,8 +51,7 @@ class Generator(nn.Module):
             nn.ReLU(inplace=True),
             nn.ConvTranspose2d(256, 128, kernel_size=3,
                                stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(128),
-            nn.Dropout(0.5)
+            nn.BatchNorm2d(128)
         )
 
         self.decoder2 = nn.Sequential(
