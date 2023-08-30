@@ -126,7 +126,7 @@ class CNN:
         opinion = critic(interpolates)
 
         # Create a tensor of ones for the fake samples
-        fake = torch.ones(real_data.shape[0], 1).cuda()
+        fake = torch.ones(real_data.shape).cuda()
 
         # Calculate gradients of the critic's evaluations with respect to the interpolated data
         gradients = autograd.grad(
