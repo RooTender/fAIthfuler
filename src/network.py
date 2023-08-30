@@ -89,32 +89,30 @@ class Generator(nn.Module):
         return out
 
 
-class Discriminator(nn.Module):
+class Critic(nn.Module):
     """
-    A convolutional neural network (CNN) discriminator for distinguishing real and fake images.
+    A convolutional neural network (CNN) critic for Wasserstein GANs.
 
     Attributes:
-        structure (nn.Sequential): The sequential layers of the discriminator.
+        structure (nn.Sequential): The sequential layers of the critic.
     """
 
     def __init__(self):
-        super(Discriminator, self).__init__()
+        super(Critic, self).__init__()
 
         self.structure = nn.Sequential(
-            nn.Conv2d(4*2, 64, kernel_size=4, stride=2, padding=1, bias=False),
+            nn.Conv2d(4, 64, kernel_size=4, stride=2, padding=1, bias=False),
             nn.LeakyReLU(0.2, inplace=True),
 
             nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(128),
             nn.LeakyReLU(0.2, inplace=True),
 
             nn.Conv2d(128, 256, kernel_size=4,
                       stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(256),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(256, 1, kernel_size=4, stride=1, padding=1, bias=False),
-            nn.Sigmoid()
+            nn.Conv2d(256, 1, kernel_size=4, stride=1, padding=0, bias=False),
+            # The last layer outputs raw scores, not probabilities.
         )
 
     def forward(self, image):
