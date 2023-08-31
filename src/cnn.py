@@ -103,8 +103,7 @@ class CNN:
 
         return train_loader
 
-    def __compute_gradient_penalty(self, batch_size,
-                                   critic, real_data, generated_data, lambda_value: int = 10):
+    def __compute_gradient_penalty(self, critic, real_data, generated_data, lambda_value: int = 10):
         """
         Computes the gradient penalty loss for Wasserstein GAN with Gradient Penalty (WGAN-GP).
 
@@ -118,9 +117,8 @@ class CNN:
         """
 
         # Generate random values between 0 and 1 to interpolate between real and generated data
-        alpha = torch.FloatTensor(batch_size, 1, 1, 1).uniform_(0, 1)
-        alpha = alpha.expand(batch_size,
-                             real_data.size(1), real_data.size(2), real_data.size(3)).cuda()
+        alpha = torch.FloatTensor(real_data.size(0), 1, 1, 1).uniform_(0, 1)
+        alpha = alpha.expand(real_data.size()).cuda()
 
         # Interpolate between real and fake data using the alpha values
         interpolates = (alpha * real_data +
@@ -147,8 +145,7 @@ class CNN:
             parameter.requires_grad = enable_gradient_computation
 
     def __train(self, dir_for_models: str, train_set: DataLoader,
-                learning_rate: float, batch_size: int,
-                num_of_epochs: int = -1, finetune_models_path: str = ''):
+                learning_rate: float, num_of_epochs: int = -1, finetune_models_path: str = ''):
         models_path = os.path.join('..', 'models', dir_for_models)
 
         # Initialize Generator and Discriminator
@@ -214,7 +211,7 @@ class CNN:
 
                     # Gradient Penalty
                     gradient_penalty = self.__compute_gradient_penalty(
-                        batch_size, critic, real_data.data, gen_data.data, lambda_gp)
+                        critic, real_data.data, gen_data.data, lambda_gp)
                     gradient_penalty.backward()
 
                     # => The goal is to have balance, so we aim at value = 0
@@ -273,7 +270,7 @@ class CNN:
         """
 
         learning_rate = 0.0001
-        batch_size = 64
+        batch_size = 16
         epochs = 500
 
         dimensions = os.path.basename(os.path.normpath(self.input_path))
@@ -304,7 +301,7 @@ class CNN:
 
         # simulate training
         self.__train(f'{dimensions}_b{batch_size}',
-                     train_set, learning_rate, batch_size,
+                     train_set, learning_rate,
                      epochs, finetune_model_path)
 
         wandb.finish()

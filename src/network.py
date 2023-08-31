@@ -101,17 +101,24 @@ class Critic(nn.Module):
         super(Critic, self).__init__()
 
         self.structure = nn.Sequential(
+            # 16 x 16
             nn.Conv2d(4, 64, kernel_size=4, stride=2, padding=1, bias=False),
+            nn.InstanceNorm2d(64, affine=True),
             nn.LeakyReLU(0.2, inplace=True),
 
+            # 8 x 8
             nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1, bias=False),
+            nn.InstanceNorm2d(128, affine=True),
             nn.LeakyReLU(0.2, inplace=True),
 
+            # 4 x 4
             nn.Conv2d(128, 256, kernel_size=4,
                       stride=2, padding=1, bias=False),
+            nn.InstanceNorm2d(256, affine=True),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(256, 4, kernel_size=4, stride=1, padding=0, bias=False),
+            # 2 x 2
+            nn.Conv2d(256, 4, kernel_size=2, stride=1, padding=0, bias=False),
         )
 
     def forward(self, image):
