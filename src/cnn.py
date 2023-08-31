@@ -14,6 +14,7 @@ import sys
 import matplotlib.pyplot as plt
 import torch
 from torch import autograd, optim
+from torch.autograd import Variable
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from PIL import Image
@@ -102,7 +103,8 @@ class CNN:
 
         return train_loader
 
-    def __compute_gradient_penalty(self, critic, real_data, generated_data):
+    def __compute_gradient_penalty(self, batch_size,
+                                   critic, real_data, generated_data, lambda_value: int = 10):
         """
         Computes the gradient penalty loss for Wasserstein GAN with Gradient Penalty (WGAN-GP).
 
@@ -116,37 +118,37 @@ class CNN:
         """
 
         # Generate random values between 0 and 1 to interpolate between real and generated data
-        alpha = torch.rand((real_data.size(0), 1, 1, 1)).cuda()
+        alpha = torch.FloatTensor(batch_size, 1, 1, 1).uniform_(0, 1)
+        alpha = alpha.expand(batch_size,
+                             real_data.size(1), real_data.size(2), real_data.size(3)).cuda()
 
         # Interpolate between real and fake data using the alpha values
-        interpolates = (alpha * real_data + ((1 - alpha)
-                        * generated_data)).requires_grad_(True)
+        interpolates = (alpha * real_data +
+                        ((1 - alpha) * generated_data)).cuda()
+        interpolates = Variable(interpolates, requires_grad=True)
 
-        # Let critic have own opinion about it
-        opinion = critic(interpolates)
-
-        # Create a tensor of ones for the fake samples
-        fake = torch.ones(real_data.shape[0], 1, 1, 1).cuda()
+        # Let critic calculate probability
+        probability = critic(interpolates)
 
         # Calculate gradients of the critic's evaluations with respect to the interpolated data
         gradients = autograd.grad(
-            outputs=opinion,
+            outputs=probability,
             inputs=interpolates,
-            grad_outputs=fake,
+            grad_outputs=torch.ones(probability.size()).cuda(),
             create_graph=True,
-            retain_graph=True,
-            only_inputs=True,
-        )[0].cuda()
-
-        # Flatten the gradients for each sample
-        gradients = gradients.view(gradients.size(0), -1).cuda()
+            retain_graph=True
+        )[0]
 
         # Calculate the gradient penalty as the mean squared difference between gradient norms and 1
-        gradient_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean()
-        return gradient_penalty
+        return ((gradients.norm(2, dim=1) - 1) ** 2).mean() * lambda_value
+
+    def __toggle_computation(self, model, enable_gradient_computation: bool):
+        for parameter in model.parameters():
+            parameter.requires_grad = enable_gradient_computation
 
     def __train(self, dir_for_models: str, train_set: DataLoader,
-                learning_rate: float, num_of_epochs: int = -1, finetune_models_path: str = ''):
+                learning_rate: float, batch_size: int,
+                num_of_epochs: int = -1, finetune_models_path: str = ''):
         models_path = os.path.join('..', 'models', dir_for_models)
 
         # Initialize Generator and Discriminator
@@ -164,12 +166,16 @@ class CNN:
                     critic.load_state_dict(torch.load(model_path))
 
         # Optimizers
-        optimizer_g = optim.RMSprop(generator.parameters(), lr=learning_rate)
-        optimizer_c = optim.RMSprop(
-            critic.parameters(), lr=learning_rate)
+        optimizer_g = optim.Adam(
+            generator.parameters(), lr=learning_rate, betas=(0.5, 0.999))
+        optimizer_c = optim.Adam(
+            critic.parameters(), lr=learning_rate, betas=(0.5, 0.999))
 
         if num_of_epochs == -1:
             num_of_epochs = 2147483647  # python doesn't have 'max' value so it's theoretical max
+
+        one = torch.tensor(1, dtype=torch.float).cuda()
+        minus_one = torch.tensor(-1, dtype=torch.float).cuda()
 
         for epoch in range(num_of_epochs):
             total_critic_loss = 0.0
@@ -186,42 +192,48 @@ class CNN:
                 input_batch = input_batch.cuda()
                 output_batch = output_batch.cuda()
 
+                self.__toggle_computation(generator, False)
+                self.__toggle_computation(critic, True)
+
                 # In WGAN the critic is updated more frequently
-                critic_updates = 3
-                for _ in range(critic_updates):
+                critic_iterations = 5
+                for _ in range(critic_iterations):
 
                     # Train discriminator
                     optimizer_c.zero_grad()
 
                     # Real Images
                     real_data = output_batch
-                    real_loss = -torch.mean(critic(real_data))
+                    real_loss = torch.mean(critic(real_data))
+                    real_loss.backward(minus_one)
 
                     # Fake Images
-                    gen_data = generator(input_batch).detach()
-                    gen_loss = torch.mean(critic(gen_data))
+                    gen_data = generator(input_batch)
+                    gan_loss = torch.mean(critic(gen_data))
+                    gan_loss.backward(one)
 
                     # Gradient Penalty
                     gradient_penalty = self.__compute_gradient_penalty(
-                        critic, real_data.data, gen_data.data)
-                    gradient_penalty = lambda_gp * gradient_penalty
+                        batch_size, critic, real_data.data, gen_data.data, lambda_gp)
+                    gradient_penalty.backward()
 
                     # => The goal is to have balance, so we aim at value = 0
-                    critic_loss = real_loss + gen_loss + gradient_penalty
-                    total_critic_loss += critic_loss / critic_updates
+                    total_critic_loss += real_loss - gan_loss + gradient_penalty / critic_iterations
 
-                    critic_loss.backward()
                     optimizer_c.step()
 
                 # Train Generator
+                self.__toggle_computation(generator, True)
+                self.__toggle_computation(critic, False)
+
                 optimizer_g.zero_grad()
 
                 generated_data = generator(input_batch)
-                generator_loss = -torch.mean(critic(generated_data).detach()).requires_grad_(True)
+                generator_loss = torch.mean(critic(generated_data))
+                generator_loss.backward(minus_one)
 
-                total_gan_loss += generator_loss
+                total_gan_loss += -generator_loss
 
-                generator_loss.backward()
                 optimizer_g.step()
 
                 total_batches += 1
@@ -260,9 +272,9 @@ class CNN:
         It sets up hyperparameters, loads data, and starts training the image translation model.
         """
 
-        learning_rate = 0.0002
-        batch_size = 16
-        epochs = -1
+        learning_rate = 0.0001
+        batch_size = 64
+        epochs = 500
 
         dimensions = os.path.basename(os.path.normpath(self.input_path))
 
@@ -292,7 +304,8 @@ class CNN:
 
         # simulate training
         self.__train(f'{dimensions}_b{batch_size}',
-                     train_set, learning_rate, epochs, finetune_model_path)
+                     train_set, learning_rate, batch_size,
+                     epochs, finetune_model_path)
 
         wandb.finish()
 

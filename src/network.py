@@ -64,8 +64,8 @@ class Generator(nn.Module):
         self.decoder3 = nn.Sequential(
             nn.ReLU(inplace=True),
             nn.ConvTranspose2d(64*2, 4, kernel_size=4,
-                               stride=2, padding=1, bias=False)
-            # The last layer outputs raw scores, not probabilities.
+                               stride=2, padding=1, bias=False),
+            nn.Tanh()
         )
 
     def forward(self, image):
@@ -108,11 +108,10 @@ class Critic(nn.Module):
             nn.LeakyReLU(0.2, inplace=True),
 
             nn.Conv2d(128, 256, kernel_size=4,
-                      stride=1, padding=0, bias=False),
+                      stride=2, padding=1, bias=False),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(256, 1, kernel_size=1, stride=1, padding=0, bias=False),
-            # The last layer outputs raw scores, not probabilities.
+            nn.Conv2d(256, 4, kernel_size=4, stride=1, padding=0, bias=False),
         )
 
     def forward(self, image):
