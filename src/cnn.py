@@ -178,6 +178,10 @@ class CNN:
             total_critic_loss = 0.0
             total_gan_loss = 0.0
 
+            total_wasserstein_distance = 0.0
+            total_real_loss = 0.0
+            total_fake_loss = 0.0
+
             total_batches = 0
 
             # Training loop
@@ -205,17 +209,21 @@ class CNN:
                     real_loss.backward(minus_one)
 
                     # Fake Images
-                    gen_data = generator(input_batch)
-                    gan_loss = torch.mean(critic(gen_data))
-                    gan_loss.backward(one)
+                    fake_data = generator(input_batch)
+                    fake_loss = torch.mean(critic(fake_data))
+                    fake_loss.backward(one)
 
                     # Gradient Penalty
                     gradient_penalty = self.__compute_gradient_penalty(
-                        critic, real_data.data, gen_data.data, lambda_gp)
+                        critic, real_data.data, fake_data.data, lambda_gp)
                     gradient_penalty.backward()
 
                     # => The goal is to have balance, so we aim at value = 0
-                    total_critic_loss += real_loss - gan_loss + gradient_penalty / critic_iterations
+                    total_critic_loss += (
+                        fake_loss - real_loss + gradient_penalty) / critic_iterations
+                    total_wasserstein_distance += (real_loss - fake_loss) / critic_iterations
+                    total_real_loss += real_loss / critic_iterations
+                    total_fake_loss += fake_loss / critic_iterations
 
                     optimizer_c.step()
 
@@ -238,11 +246,15 @@ class CNN:
             # Log metrics
             avg_critic_loss = total_critic_loss / total_batches
             avg_gan_loss = total_gan_loss / total_batches
-            avg_loss = (avg_gan_loss + avg_critic_loss) / 2
+            avg_wasserstein_distance = total_wasserstein_distance / total_batches
+            avg_real_loss = total_real_loss / total_batches
+            avg_fake_loss = total_fake_loss / total_batches
 
-            wandb.log({"Critic loss": avg_critic_loss,
-                       "GAN loss": avg_gan_loss,
-                       "Loss": avg_loss})
+            wandb.log({"Wasserstein distance": avg_wasserstein_distance,
+                       "Critic loss": avg_critic_loss,
+                       "Critic real loss": avg_real_loss,
+                       "Critic fake loss": avg_fake_loss,
+                       "GAN loss": avg_gan_loss})
 
             if epoch % 5 == 0 or epoch == num_of_epochs - 1:
                 path_to_save = os.path.join(models_path, f'e{epoch}')
