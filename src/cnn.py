@@ -136,10 +136,10 @@ class CNN:
             create_graph=True,
             retain_graph=True,
             only_inputs=True,
-        )[0]
+        )[0].cuda()
 
         # Flatten the gradients for each sample
-        gradients = gradients.view(gradients.size(0), -1)
+        gradients = gradients.view(gradients.size(0), -1).cuda()
 
         # Calculate the gradient penalty as the mean squared difference between gradient norms and 1
         gradient_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean()
@@ -187,7 +187,8 @@ class CNN:
                 output_batch = output_batch.cuda()
 
                 # In WGAN the critic is updated more frequently
-                for _ in range(5):
+                critic_updates = 3
+                for _ in range(critic_updates):
 
                     # Train discriminator
                     optimizer_c.zero_grad()
@@ -207,7 +208,7 @@ class CNN:
 
                     # => The goal is to have balance, so we aim at value = 0
                     critic_loss = real_loss + gen_loss + gradient_penalty
-                    total_critic_loss += critic_loss / 5
+                    total_critic_loss += critic_loss / critic_updates
 
                     critic_loss.backward()
                     optimizer_c.step()
@@ -259,9 +260,9 @@ class CNN:
         It sets up hyperparameters, loads data, and starts training the image translation model.
         """
 
-        learning_rate = 0.002
-        batch_size = 64
-        epochs = 500
+        learning_rate = 0.0002
+        batch_size = 16
+        epochs = -1
 
         dimensions = os.path.basename(os.path.normpath(self.input_path))
 
