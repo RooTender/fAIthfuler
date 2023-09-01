@@ -19,7 +19,7 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from PIL import Image
 from tqdm import tqdm
-import network
+import wgan.network as network
 import wandb
 
 
@@ -152,7 +152,7 @@ class CNN:
         # Initialize Generator and Discriminator
         generator = network.Generator().cuda()
         critic = network.Critic().cuda()
-        lambda_gp = 10
+        lambda_gp = 2
 
         if finetune_models_path != '':
             for model_name in os.listdir(finetune_models_path):

@@ -223,17 +223,17 @@ class Utils:
                 f'Augmenting {os.path.basename(input_dir)} ({i}/{total_directories})')
 
             files = get_files(input_dir)
-            if len(files) < goal:
+            if len(files) * 2 < goal:
                 apply_method(techniques.mirror, files)
             else:
                 continue
 
-            if len(get_files(output_dir)) < goal:
+            if len(get_files(output_dir)) * 2 < goal:
                 apply_method(techniques.flip, files)
             else:
                 continue
 
-            if len(get_files(output_dir)) < goal:
+            if len(get_files(output_dir)) * 3 < goal:
                 apply_method(techniques.rotate, files)
             else:
                 continue
@@ -250,7 +250,7 @@ class Utils:
                 continue
 
             files = get_files(output_dir)
-            if len(files) < goal:
+            if len(files) * 2 < goal:
                 apply_method(techniques.invert, files)
 
     def preprocess_data(self, input_dir: str):
@@ -366,6 +366,10 @@ class Utils:
         for dirpath, _, filenames in os.walk(input_dir):
 
             if dirpath is input_dir:
+                continue
+
+            height, width = os.path.basename(dirpath).split('x')
+            if height != width:
                 continue
 
             if len(os.listdir(dirpath)) < 10:

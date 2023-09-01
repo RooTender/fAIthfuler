@@ -3,7 +3,7 @@ import os
 from multiprocessing import freeze_support
 from texture_tools import ArchiveHandler
 from augmentator import Utils, Techniques
-from cnn import CNN
+from wgan.cnn import CNN
 
 
 def unpack_textures():
@@ -23,7 +23,7 @@ def augment_datasets(output_scale_ratio: int):
         os.path.join("..", "data", "output", "augmented"))
 
     utils.prepare_data(output_scale_ratio)
-    utils.smart_augmentation(techniques, 100000)
+    utils.smart_augmentation(techniques, 10000)
 
 
 if __name__ == '__main__':
@@ -36,5 +36,5 @@ if __name__ == '__main__':
                                "augmented", "original", "8x8"),
                   os.path.join("..", "data", "output",
                                "augmented", "x32", "16x16"))
-    network.run()
-    #network.test(os.path.join('..','models','8x8_b64','e30','generator_0.293781.pth'))
+    network.run() 
+    #network.test(os.path.join('..','models','8x8_b16','e135','generator_2.0134072303771973.pth'))
