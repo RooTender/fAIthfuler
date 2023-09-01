@@ -117,12 +117,13 @@ class CNN:
         """
 
         # Generate random values between 0 and 1 to interpolate between real and generated data
-        alpha = torch.FloatTensor(real_data.size(0), 1, 1, 1).uniform_(0, 1)
-        alpha = alpha.expand(real_data.size()).cuda()
+        #alpha = torch.FloatTensor(real_data.size(0), 1, 1, 1).uniform_(0, 1)
+        #alpha = alpha.expand(real_data.size()).cuda()
 
         # Interpolate between real and fake data using the alpha values
-        interpolates = (alpha * real_data +
-                        ((1 - alpha) * generated_data)).cuda()
+        #interpolates = (alpha * real_data +
+        #                ((1 - alpha) * generated_data)).cuda()
+        interpolates = 0.5 * (real_data + generated_data).cuda()
         interpolates = Variable(interpolates, requires_grad=True)
 
         # Let critic calculate probability
