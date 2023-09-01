@@ -1,68 +1,21 @@
 """
-This module provides classes and methods for training and 
-evaluating image translation models using PyTorch and WANDB.
+This module implements the Wasserstein GAN with
+Gradient Penalty (WGAN-GP) algorithm for image translation.
 
-Classes:
-    - ImageLoaderDataset: A PyTorch dataset for loading pairs of 
-    input and output images from specified directories.
-    - CNN: Trains neural networks and evaluates them.
+It provides methods for training the generator and
+critic networks using the WGAN-GP loss function.
 """
+
 import os
-import random
 import shutil
 import sys
-import matplotlib.pyplot as plt
 import torch
 from torch import autograd, optim
 from torch.autograd import Variable
-from torch.utils.data import Dataset, DataLoader
-from torchvision import transforms
-from PIL import Image
+from utils.dataset_loader import DatasetLoader, DataLoader
 from tqdm import tqdm
-import wgan.network as network
+from architectures._16x16 import wgan_gp as network
 import wandb
-
-
-class ImageLoaderDataset(Dataset):
-    """
-    A PyTorch dataset for loading pairs of input and output images from specified directories.
-
-    Args:
-        input_root_dir (str): The root directory containing input images.
-        output_root_dir (str): The root directory containing corresponding output images.
-        transform (callable, optional): A function/transform to apply to the images.
-
-    Attributes:
-        input_root_dir (str): The root directory containing input images.
-        output_root_dir (str): The root directory containing corresponding output images.
-        transform (callable, optional): A function/transform to apply to the images.
-        image_paths (list of tuple): A list of tuples containing input and output image file paths.
-    """
-
-    def __init__(self, input_root_dir, output_root_dir, transform=None):
-        self.input_root_dir = input_root_dir
-        self.output_root_dir = output_root_dir
-        self.transform = transform
-        self.image_paths = [(os.path.join(input_root_dir, file),
-                             os.path.join(output_root_dir, file))
-                            for file in os.listdir(input_root_dir)]
-
-    def __len__(self):
-        return len(self.image_paths)
-
-    def __getitem__(self, idx):
-        input_image_path, output_image_path = self.image_paths[idx]
-        input_image = Image.open(input_image_path)
-        output_image = Image.open(output_image_path)
-
-        input_image = input_image.resize(
-            output_image.size, Image.Resampling.NEAREST)
-
-        if self.transform:
-            input_image = self.transform(input_image)
-            output_image = self.transform(output_image)
-
-        return input_image, output_image
 
 
 class CNN:
@@ -75,7 +28,7 @@ class CNN:
     WANDB for tracking and visualization of training progress.
     """
 
-    def __init__(self, input_path: str, output_path: str):
+    def __init__(self, loader: DatasetLoader):
         """
         Initialize the CNN object with input and output paths for data.
 
@@ -83,25 +36,7 @@ class CNN:
             input_path (str): Path to the directory containing input images.
             output_path (str): Path to the directory containing corresponding ground truth images.
         """
-        self.input_path = input_path
-        self.output_path = output_path
-
-    def __load_data(self, batch_size: int):
-        print(f'Input dataset: {self.input_path}')
-        print(f'Output dataset: {self.output_path}')
-        print('Reading datasets...')
-
-        transformator = transforms.Compose([
-            transforms.ToTensor()  # Convert images to tensors
-        ])
-
-        input_data = ImageLoaderDataset(
-            self.input_path, self.output_path, transform=transformator)
-
-        train_loader = DataLoader(input_data, batch_size=batch_size,
-                                  shuffle=True, pin_memory=True, num_workers=4)
-
-        return train_loader
+        self.dataloader = loader
 
     def __compute_gradient_penalty(self, critic, real_data, generated_data, lambda_value: int = 10):
         """
@@ -117,11 +52,11 @@ class CNN:
         """
 
         # Generate random values between 0 and 1 to interpolate between real and generated data
-        #alpha = torch.FloatTensor(real_data.size(0), 1, 1, 1).uniform_(0, 1)
-        #alpha = alpha.expand(real_data.size()).cuda()
+        # alpha = torch.FloatTensor(real_data.size(0), 1, 1, 1).uniform_(0, 1)
+        # alpha = alpha.expand(real_data.size()).cuda()
 
         # Interpolate between real and fake data using the alpha values
-        #interpolates = (alpha * real_data +
+        # interpolates = (alpha * real_data +
         #                ((1 - alpha) * generated_data)).cuda()
         interpolates = 0.5 * (real_data + generated_data).cuda()
         interpolates = Variable(interpolates, requires_grad=True)
@@ -222,7 +157,8 @@ class CNN:
                     # => The goal is to have balance, so we aim at value = 0
                     total_critic_loss += (
                         fake_loss - real_loss + gradient_penalty) / critic_iterations
-                    total_wasserstein_distance += (real_loss - fake_loss) / critic_iterations
+                    total_wasserstein_distance += (real_loss -
+                                                   fake_loss) / critic_iterations
                     total_real_loss += real_loss / critic_iterations
                     total_fake_loss += fake_loss / critic_iterations
 
@@ -270,7 +206,7 @@ class CNN:
                 torch.save(critic.state_dict(), os.path.join(
                     path_to_save, f'critic_{avg_critic_loss}.pth'))
 
-    def run(self, finetune_model_path: str = '', wandb_id: str = ''):
+    def train(self, finetune_model_path: str = '', wandb_id: str = ''):
         """
         Run the image translation model training and logging process.
 
@@ -286,7 +222,7 @@ class CNN:
         batch_size = 16
         epochs = 500
 
-        dimensions = os.path.basename(os.path.normpath(self.input_path))
+        dimensions = self.dataloader.get_images_dimension()
 
         # start a new wandb run to track this script
         wandb.init(
@@ -310,7 +246,7 @@ class CNN:
         else:
             print("CUDA detected! Initializing...")
 
-        train_set = self.__load_data(batch_size)
+        train_set = self.dataloader.load_data(batch_size)
 
         # simulate training
         self.__train(f'{dimensions}_b{batch_size}',
@@ -318,67 +254,3 @@ class CNN:
                      epochs, finetune_model_path)
 
         wandb.finish()
-
-    def test(self, model_path: str, images_to_test: int = 9):
-        """
-        Test and visualize the performance of a generator model on input images.
-
-        Args:
-            model_path (str): Path to the trained generator model's checkpoint.
-            images_to_test (int, optional): Number of images to test and visualize. Default is `9`.
-        """
-
-        # Select 9 common random files between input_files and output_files
-        selected_files = random.sample(
-            os.listdir(self.input_path), images_to_test)
-
-        # Load the model
-        generator = network.Generator().cuda()
-        generator.load_state_dict(torch.load(model_path))
-        generator.eval()
-
-        # Initialize matplotlib
-        _, axes = plt.subplots(len(selected_files), 4, figsize=(20, 45))
-        plt.subplots_adjust(hspace=0.4, wspace=0.3)
-        columns = ['Filename', 'Input', 'Ground Truth', 'Generated']
-
-        # Populate each row
-        for i, ax_row in enumerate(axes):
-            ax_filename, ax_input, ax_ground, ax_generated = ax_row
-
-            # Display filename
-            ax_filename.axis('off')
-            ax_filename.text(
-                0.5, 0.5, selected_files[i],
-                horizontalalignment='center', verticalalignment='center')
-
-            # Load and display the input image
-            input_image_path = os.path.join(self.input_path, selected_files[i])
-            input_image = Image.open(input_image_path)
-            ax_input.imshow(input_image)
-
-            # Load and display the ground truth
-            ground_image_path = os.path.join(
-                self.output_path, selected_files[i])
-            ground_image = Image.open(ground_image_path)
-            ax_ground.imshow(ground_image)
-
-            # Preprocess the input image and run it through the model
-            input_image = input_image.resize(
-                ground_image.size, Image.Resampling.NEAREST)
-            transform = transforms.ToTensor()
-            input_tensor = transform(input_image).unsqueeze(
-                0).cuda()  # Add batch dimension and move to GPU
-            with torch.no_grad():
-                generated_tensor = generator(input_tensor)
-
-            # Convert tensor to PIL Image and display it
-            generated_image = transforms.ToPILImage()(generated_tensor.squeeze(0).cpu())
-            ax_generated.imshow(generated_image)
-
-        # Set column titles
-        for axes, column in zip(axes[0], columns):
-            axes.set_title(column)
-
-        # Show the plot
-        plt.show()

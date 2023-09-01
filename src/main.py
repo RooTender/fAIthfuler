@@ -3,7 +3,7 @@ import os
 from multiprocessing import freeze_support
 from texture_tools import ArchiveHandler
 from augmentator import Utils, Techniques
-from wgan.cnn import CNN
+from cnn.pix2pix import CNN, DatasetLoader
 
 
 def unpack_textures():
@@ -31,10 +31,11 @@ if __name__ == '__main__':
     freeze_support()
 
     # augment_datasets(2)
-
-    network = CNN(os.path.join("..", "data", "output",
-                               "augmented", "original", "8x8"),
-                  os.path.join("..", "data", "output",
-                               "augmented", "x32", "16x16"))
-    network.run() 
-    #network.test(os.path.join('..','models','8x8_b16','e135','generator_2.0134072303771973.pth'))
+    loader = DatasetLoader(
+        os.path.join("..", "data", "output",
+                     "augmented", "original", "8x8"),
+        os.path.join("..", "data", "output",
+                     "augmented", "x32", "16x16"))
+    network = CNN(loader)
+    network.train()
+    # network.test(os.path.join('..','models','8x8_b16','e135','generator_2.0134072303771973.pth'))

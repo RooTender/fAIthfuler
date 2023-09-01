@@ -3,9 +3,9 @@ This module defines a pair of neural network models for an image-to-image transl
 
 The module includes:
 - A Generator: Takes an input image and produces an output image.
-- A Discriminator: Distinguishes between real and fake images.
+- A Critic: Evaluates the quality of generated images.
 
-Note: The Generator and Discriminator classes in this module are based on Pix2Pix architecture.
+Note: The Generator and Critic classes in this module are based on Pix2Pix architecture.
 """
 
 import torch
@@ -123,12 +123,12 @@ class Critic(nn.Module):
 
     def forward(self, image):
         """
-        Forward pass through the discriminator.
+        Forward pass through the critic.
 
         Args:
             image (torch.Tensor): The input image tensor.
 
         Returns:
-            torch.Tensor: The discriminator's output tensor (real vs. fake probability).
+            torch.Tensor: The critic's output tensor.
         """
         return self.structure(image)
