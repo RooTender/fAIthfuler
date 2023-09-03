@@ -1,9 +1,13 @@
 """Main module"""
 import os
+import sys
 from multiprocessing import freeze_support
 from texture_tools import ArchiveHandler
 from augmentator import Utils, Techniques
+
+sys.path.append('cnn')
 from cnn.pix2pix import CNN, DatasetLoader
+
 
 
 def unpack_textures():
@@ -38,4 +42,4 @@ if __name__ == '__main__':
                      "augmented", "x32", "16x16"))
     network = CNN(loader)
     network.train()
-    # network.test(os.path.join('..','models','8x8_b16','e135','generator_2.0134072303771973.pth'))
+    #network.test_model(os.path.join('..','models','8x8_b16','e285','generator_1.803540.pth'))

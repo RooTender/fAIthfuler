@@ -13,7 +13,8 @@ import sys
 import torch
 from torch import nn, optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from utils.dataset_loader import DatasetLoader, DataLoader
+from dataset_loader import DatasetLoader, DataLoader
+from model_tester import ModelTester
 from tqdm import tqdm
 from architectures._16x16 import pix2pix as network
 import wandb
@@ -39,6 +40,13 @@ class CNN:
         """
         self.dataloader = loader
 
+    def __weights_init(self, model):
+        if isinstance(model, nn.Conv2d) or isinstance(model, nn.Linear):
+            nn.init.kaiming_normal_(model.weight, mode='fan_out', nonlinearity='relu')
+        elif isinstance(model, nn.BatchNorm2d):
+            nn.init.constant_(model.weight, 1)
+            nn.init.constant_(model.bias, 0)
+
     def __train(self, dir_for_models: str, train_set: DataLoader,
                 learning_rate: float, num_of_epochs: int = -1, finetune_from_epoch: int = -1):
         models_path = os.path.join('..', 'models', dir_for_models)
@@ -46,6 +54,9 @@ class CNN:
         # Initialize Generator and Discriminator
         generator = network.Generator().cuda()
         discriminator = network.Discriminator().cuda()
+
+        generator.apply(self.__weights_init)
+        discriminator.apply(self.__weights_init)
 
         if finetune_from_epoch >= 0:
             for model_name in os.listdir(os.path.join(models_path, f'e{finetune_from_epoch}')):
@@ -57,25 +68,22 @@ class CNN:
                     discriminator.load_state_dict(torch.load(model_path))
 
         # Optimizers
-        optimizer_g = optim.Adam(
-            generator.parameters(), lr=learning_rate, betas=(0.5, 0.999))
-        optimizer_d = optim.Adam(
-            discriminator.parameters(), lr=learning_rate, betas=(0.5, 0.999))
+        optimizer_g = optim.SGD(
+            generator.parameters(), lr=learning_rate, momentum=0.9)
+        optimizer_d = optim.SGD(
+            discriminator.parameters(), lr=learning_rate, momentum=0.9)
 
         # Schedulers
         scheduler_g = ReduceLROnPlateau(
-            optimizer_g, 'min', cooldown=2, patience=3, factor=0.5, threshold=0.01)
-
-        plateau_count = 0
-        last_lr = learning_rate
+            optimizer_g, 'min', cooldown=5, patience=20, factor=0.5, threshold=0.001)
 
         # Losses
         criterion = nn.BCELoss()
-        l1_lambda = 10
+        l1_lambda = 100
 
         training_start = finetune_from_epoch + 1
         if num_of_epochs == -1:
-            num_of_epochs = 2147483647  # python doesn't have 'max' value so it's theoretical max
+            num_of_epochs = sys.maxsize
 
         for epoch in range(training_start, training_start + num_of_epochs):
             total_real_loss = 0.0
@@ -103,7 +111,7 @@ class CNN:
                                     dtype=torch.float).cuda()
 
                 # slow down learning
-                real_loss = 0.5 * criterion(prediction, labels)
+                real_loss = 0.25 * criterion(prediction, labels)
                 total_real_loss += real_loss
                 real_loss.backward()
 
@@ -116,14 +124,15 @@ class CNN:
                                      dtype=torch.float).cuda()
 
                 # slow down learning
-                fake_loss = 0.5 * criterion(prediction, labels)
+                fake_loss = 0.25 * criterion(prediction, labels)
                 total_fake_loss += fake_loss
                 fake_loss.backward()
 
                 optimizer_d.step()
 
                 # Train Generator
-                for _ in range(5):
+                generator_iterations = 5
+                for _ in range(generator_iterations):
                     optimizer_g.zero_grad()
 
                     gan_batch = generator(input_batch)
@@ -135,7 +144,7 @@ class CNN:
 
                     gan_loss = criterion(
                         prediction, labels) + l1_lambda * torch.abs(gan_batch - output_batch).mean()
-                    total_gan_loss += gan_loss
+                    total_gan_loss += gan_loss / generator_iterations
 
                     gan_loss.backward()
                     optimizer_g.step()
@@ -160,10 +169,9 @@ class CNN:
             # Update scheduler
             scheduler_g.step(avg_gan_loss)
 
-            if optimizer_g.param_groups[0]['lr'] < last_lr:
-                last_lr = optimizer_g.param_groups[0]['lr']
-                print(f"Learning rate set to: {last_lr}")
-                plateau_count += 1
+            if optimizer_g.param_groups[0]['lr'] < learning_rate:
+                learning_rate = optimizer_g.param_groups[0]['lr']
+                print(f"Learning rate set to: {learning_rate}")
 
             if epoch % 5 == 0 or epoch == training_start + num_of_epochs - 1:
                 path_to_save = os.path.join(models_path, f'e{epoch}')
@@ -190,8 +198,8 @@ class CNN:
         It sets up hyperparameters, loads data, and starts training the image translation model.
         """
 
-        learning_rate = 0.002
-        batch_size = 64
+        learning_rate = 0.001
+        batch_size = 16
         epochs = -1
 
         dimensions = self.dataloader.get_images_dimension()
@@ -226,3 +234,7 @@ class CNN:
                      epochs, finetune_from_epoch)
 
         wandb.finish()
+
+    def test_model(self, model_path: str, images_to_test: int = 9):
+        tester = ModelTester(network.Generator, self.dataloader)
+        tester.test(model_path, images_to_test)

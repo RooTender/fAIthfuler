@@ -32,38 +32,38 @@ class Generator(nn.Module):
 
         # Encoder
         self.encoder1 = nn.Conv2d(
-            4, 64, kernel_size=4, stride=2, padding=1, bias=False)
+            4, 128, kernel_size=4, stride=2, padding=1, bias=False)
 
         self.encoder2 = nn.Sequential(
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(128)
+            nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(256)
         )
 
         self.encoder3 = nn.Sequential(
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(128, 256, kernel_size=4,
+            nn.Conv2d(256, 512, kernel_size=4,
                       stride=2, padding=1, bias=False),
         )
 
         # Decoder
         self.decoder1 = nn.Sequential(
             nn.ReLU(inplace=True),
-            nn.ConvTranspose2d(256, 128, kernel_size=4,
+            nn.ConvTranspose2d(512, 256, kernel_size=4,
                                stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(128)
+            nn.BatchNorm2d(256)
         )
 
         self.decoder2 = nn.Sequential(
             nn.ReLU(inplace=True),
-            nn.ConvTranspose2d(128*2, 64, kernel_size=4,
+            nn.ConvTranspose2d(256*2, 128, kernel_size=4,
                                stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(64)
+            nn.BatchNorm2d(128)
         )
 
         self.decoder3 = nn.Sequential(
             nn.ReLU(inplace=True),
-            nn.ConvTranspose2d(64*2, 4, kernel_size=4,
+            nn.ConvTranspose2d(128*2, 4, kernel_size=4,
                                stride=2, padding=1, bias=False),
             nn.Tanh()
         )
@@ -102,23 +102,22 @@ class Critic(nn.Module):
 
         self.structure = nn.Sequential(
             # 16 x 16
-            nn.Conv2d(4, 64, kernel_size=4, stride=2, padding=1, bias=False),
-            nn.InstanceNorm2d(64, affine=True),
+            nn.Conv2d(4, 128, kernel_size=4, stride=2, padding=1, bias=False),
             nn.LeakyReLU(0.2, inplace=True),
 
             # 8 x 8
-            nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1, bias=False),
-            nn.InstanceNorm2d(128, affine=True),
-            nn.LeakyReLU(0.2, inplace=True),
-
-            # 4 x 4
-            nn.Conv2d(128, 256, kernel_size=4,
-                      stride=2, padding=1, bias=False),
+            nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1, bias=False),
             nn.InstanceNorm2d(256, affine=True),
             nn.LeakyReLU(0.2, inplace=True),
 
+            # 4 x 4
+            nn.Conv2d(256, 512, kernel_size=4,
+                      stride=2, padding=1, bias=False),
+            nn.InstanceNorm2d(512, affine=True),
+            nn.LeakyReLU(0.2, inplace=True),
+
             # 2 x 2
-            nn.Conv2d(256, 4, kernel_size=2, stride=1, padding=0, bias=False),
+            nn.Conv2d(512, 4, kernel_size=2, stride=1, padding=0, bias=False),
         )
 
     def forward(self, image):

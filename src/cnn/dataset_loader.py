@@ -122,4 +122,4 @@ class DatasetLoader:
         ]
 
     def get_images_dimension(self):
-        return os.path.basename(os.path.normpath(self.output_path))
+        return os.path.basename(os.path.normpath(self.input_path))

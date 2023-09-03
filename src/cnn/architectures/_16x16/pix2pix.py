@@ -32,40 +32,39 @@ class Generator(nn.Module):
 
         # Encoder
         self.encoder1 = nn.Conv2d(
-            4, 64, kernel_size=2, stride=2, padding=0, bias=False)
+            4, 128, kernel_size=4, stride=2, padding=1, bias=False)
 
         self.encoder2 = nn.Sequential(
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(64, 128, kernel_size=2, stride=2, padding=0, bias=False),
-            nn.BatchNorm2d(128)
+            nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(256)
         )
 
         self.encoder3 = nn.Sequential(
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(128, 256, kernel_size=2,
-                      stride=2, padding=0, bias=False),
+            nn.Conv2d(256, 512, kernel_size=4,
+                      stride=2, padding=1, bias=False),
         )
 
         # Decoder
         self.decoder1 = nn.Sequential(
             nn.ReLU(inplace=True),
-            nn.ConvTranspose2d(256, 128, kernel_size=2,
-                               stride=2, padding=0, bias=False),
-            nn.BatchNorm2d(128),
-            nn.Dropout(0.5)
+            nn.ConvTranspose2d(512, 256, kernel_size=4,
+                               stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(256)
         )
 
         self.decoder2 = nn.Sequential(
             nn.ReLU(inplace=True),
-            nn.ConvTranspose2d(128*2, 64, kernel_size=2,
-                               stride=2, padding=0, bias=False),
-            nn.BatchNorm2d(64)
+            nn.ConvTranspose2d(256*2, 128, kernel_size=4,
+                               stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(128)
         )
 
         self.decoder3 = nn.Sequential(
             nn.ReLU(inplace=True),
-            nn.ConvTranspose2d(64*2, 4, kernel_size=2,
-                               stride=2, padding=0, bias=False),
+            nn.ConvTranspose2d(128*2, 4, kernel_size=4,
+                               stride=2, padding=1, bias=False),
             nn.Tanh()
         )
 
@@ -102,19 +101,19 @@ class Discriminator(nn.Module):
         super(Discriminator, self).__init__()
 
         self.structure = nn.Sequential(
-            nn.Conv2d(4*2, 64, kernel_size=2, stride=2, padding=0, bias=False),
+            nn.Conv2d(4*2, 64, kernel_size=4, stride=2, padding=1, bias=False),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(64, 128, kernel_size=2, stride=2, padding=0, bias=False),
+            nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1, bias=False),
             nn.BatchNorm2d(128),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(128, 256, kernel_size=2,
-                      stride=2, padding=0, bias=False),
+            nn.Conv2d(128, 256, kernel_size=4,
+                      stride=2, padding=1, bias=False),
             nn.BatchNorm2d(256),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(256, 1, kernel_size=2, stride=1, padding=0, bias=False),
+            nn.Conv2d(256, 1, kernel_size=4, stride=1, padding=1, bias=False),
             nn.Sigmoid()
         )
 

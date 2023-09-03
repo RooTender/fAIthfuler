@@ -40,7 +40,7 @@ class ModelTester:
         images = self.dataloader.get_random_images(images_to_test)
 
         # Load the model
-        generator = self.model.cuda()
+        generator = self.model().cuda()
         generator.load_state_dict(torch.load(model_path))
         generator.eval()
 
