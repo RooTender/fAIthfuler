@@ -68,7 +68,7 @@ class Generator(nn.Module):
 
         # Residual connection layers for decoder
         self.res_dec1 = nn.ConvTranspose2d(
-            128, 128, kernel_size=3, stride=1, padding=1)
+            128*2, 128*2, kernel_size=3, stride=1, padding=1)
 
         self.decoder3 = nn.Sequential(
             nn.ReLU(inplace=True),

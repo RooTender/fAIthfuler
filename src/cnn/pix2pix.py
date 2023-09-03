@@ -16,7 +16,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from dataset_loader import DatasetLoader, DataLoader
 from model_tester import ModelTester
 from tqdm import tqdm
-from architectures._16x16 import pix2pix as network
+from architectures._16x16 import pix2pix_resnet as network
 import wandb
 
 
@@ -213,10 +213,10 @@ class CNN:
             name=f"FaithfulNet_{dimensions}",
             # track hyperparameters and run metadata
             config={
-                "architecture": "CNN",
+                "architecture": "pix2pix",
                 "learning_rate": learning_rate,
                 "batch_size": batch_size,
-                "optimizer": "Adam"
+                "optimizer": "SGD"
             }
         )
 
