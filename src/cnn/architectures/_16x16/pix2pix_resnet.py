@@ -1,6 +1,6 @@
 """
 This module defines a pair of neural network models for an image-to-image translation task.
-It uses U-net as main architecture.
+However, instead of being based on U-Net, it also includes ResNet.
 
 The module includes:
 - A Generator: Takes an input image and produces an output image.
@@ -42,6 +42,9 @@ class Generator(nn.Module):
             nn.BatchNorm2d(256)
         )
 
+        # Residual connection layers for encoder
+        self.res_enc1 = nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1)
+
         self.encoder3 = nn.Sequential(
             nn.LeakyReLU(0.2, inplace=True),
             nn.Conv2d(256, 512, kernel_size=4,
@@ -63,6 +66,10 @@ class Generator(nn.Module):
             nn.BatchNorm2d(128)
         )
 
+        # Residual connection layers for decoder
+        self.res_dec1 = nn.ConvTranspose2d(
+            128, 128, kernel_size=3, stride=1, padding=1)
+
         self.decoder3 = nn.Sequential(
             nn.ReLU(inplace=True),
             nn.ConvTranspose2d(128*2, 4, kernel_size=4,
@@ -82,10 +89,12 @@ class Generator(nn.Module):
         """
         e1 = self.encoder1(image)
         e2 = self.encoder2(e1)
+        e2 = e2 + self.res_enc1(e2)
         latent_space = self.encoder3(e2)
 
         d1 = torch.cat([self.decoder1(latent_space), e2], dim=1)
         d2 = torch.cat([self.decoder2(d1), e1], dim=1)
+        d2 = d2 + self.res_dec1(d2)
         out = self.decoder3(d2)
 
         return out
