@@ -38,19 +38,13 @@ class Generator(nn.Module):
 
         self.encoder2 = nn.Sequential(
             nn.LeakyReLU(relu_factor, inplace=True),
-            nn.Conv2d(64 * layer_multiplier, 128 * layer_multiplier, kernel_size=4,
-                      stride=2, padding=1, bias=False),
+            nn.Conv2d(64 * layer_multiplier, 128 * layer_multiplier,
+                      kernel_size=4, stride=2, padding=1, bias=False),
             nn.BatchNorm2d(128 * layer_multiplier)
         )
 
         # Residual connection layers for encoder
-        self.res_enc_block = nn.Sequential(
-            nn.Conv2d(128 * layer_multiplier, 128 * layer_multiplier,
-                      kernel_size=3, stride=1, padding=1),
-            nn.LeakyReLU(relu_factor, inplace=True),
-            nn.Conv2d(128 * layer_multiplier, 128 * layer_multiplier,
-                      kernel_size=3, stride=1, padding=1)
-        )
+        self.res_enc1 = nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1)
 
         self.encoder3 = nn.Sequential(
             nn.LeakyReLU(relu_factor, inplace=True),
@@ -74,18 +68,13 @@ class Generator(nn.Module):
         )
 
         # Residual connection layers for decoder
-        self.res_dec_block = nn.Sequential(
-            nn.Conv2d(64*2 * layer_multiplier, 64*2 * layer_multiplier,
-                      kernel_size=3, stride=1, padding=1),
-            nn.LeakyReLU(relu_factor, inplace=True),
-            nn.Conv2d(128*2 * layer_multiplier, 128*2 * layer_multiplier,
-                      kernel_size=3, stride=1, padding=1)
-        )
+        self.res_dec1 = nn.ConvTranspose2d(64*2 * layer_multiplier, 64*2 * layer_multiplier, 
+                                           kernel_size=3, stride=1, padding=1)
 
         self.decoder3 = nn.Sequential(
             nn.ReLU(inplace=True),
-            nn.ConvTranspose2d(64*2 * layer_multiplier, 4, kernel_size=4,
-                               stride=2, padding=1, bias=False),
+            nn.ConvTranspose2d(64*2 * layer_multiplier, 4,
+                               kernel_size=4, stride=2, padding=1, bias=False),
             nn.Tanh()
         )
 
@@ -99,18 +88,15 @@ class Generator(nn.Module):
         Returns:
             torch.Tensor: The output image tensor.
         """
-        res_blocks = 5
 
         e1 = self.encoder1(image)
         e2 = self.encoder2(e1)
-        for _ in range(res_blocks):
-            e2 += self.res_enc_block(e2)
+        e2 = e2 + self.res_enc1(e2)
         latent_space = self.encoder3(e2)
 
         d1 = torch.cat([self.decoder1(latent_space), e2], dim=1)
         d2 = torch.cat([self.decoder2(d1), e1], dim=1)
-        for _ in range(res_blocks):
-            d2 += self.res_enc_block(d2)
+        d2 = d2 + self.res_dec1(d2)
         out = self.decoder3(d2)
 
         return out
