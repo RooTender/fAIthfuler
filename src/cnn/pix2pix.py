@@ -49,7 +49,8 @@ class CNN:
             nn.init.constant_(model.bias, 0)
 
     def __train(self, dir_for_models: str, train_set: DataLoader, val_set: DataLoader,
-                learning_rate: float, num_of_epochs: int = -1, finetune_from_epoch: int = -1):
+                learning_rate: float, num_of_epochs: int = -1, finetune_from_epoch: int = -1,
+                save_models: bool = True):
         models_path = os.path.join('..', 'models', dir_for_models)
 
         # Initialize Generator and Discriminator
@@ -209,7 +210,7 @@ class CNN:
                 learning_rate = optimizer_g.param_groups[0]['lr']
                 print(f"Learning rate set to: {learning_rate}")
 
-            if epoch % 5 == 0 or epoch == training_start + num_of_epochs - 1:
+            if save_models and (epoch % 5 == 0 or epoch == training_start + num_of_epochs - 1):
                 path_to_save = os.path.join(models_path, f'e{epoch}')
                 try:
                     os.makedirs(path_to_save)
@@ -221,6 +222,18 @@ class CNN:
                     path_to_save, f'generator_{avg_gan_loss:4f}.pth'))
                 torch.save(discriminator.state_dict(), os.path.join(
                     path_to_save, f'discriminator_{avg_dicriminator_loss:4f}.pth'))
+
+    def __sweep_train(self):
+        wandb.init()
+        config = wandb.config
+
+        dimensions = self.dataloader.get_images_dimension()
+        train_set, val_set = self.dataloader.load_data(config.batch_size)
+
+        self.__train(dimensions, train_set, val_set,
+                     config.learning_rate,
+                     config.epochs,
+                     save_models=False)
 
     def train(self, finetune_from_epoch: int = -1, wandb_id: str = ''):
         """
@@ -270,6 +283,34 @@ class CNN:
                      epochs, finetune_from_epoch)
 
         wandb.finish()
+
+    def sweep(self):
+        dimensions = self.dataloader.get_images_dimension()
+
+        sweep_config = {
+            'name': f"FaithfulNet_{dimensions}",
+            'method': 'bayes',
+            'metric': {
+                'name': 'GAN loss',
+                'goal': 'minimize'   
+            },
+            'parameters': {
+                'learning_rate': {
+                    'min': 0.0001,
+                    'max': 0.01,
+                    'distribution': 'uniform'
+                },
+                'batch_size': {
+                    'values': [16, 32, 64]
+                },
+                'epochs': {
+                    'values': [10]
+                }
+            }
+        }
+
+        sweep_id = wandb.sweep(sweep_config, project="FAIthfuler", entity="rootender")
+        wandb.agent(sweep_id, function=self.__sweep_train)
 
     def test_model(self, model_path: str, images_to_test: int = 9):
         tester = ModelTester(network.Generator, self.dataloader)
