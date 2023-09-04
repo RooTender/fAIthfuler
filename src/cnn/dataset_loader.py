@@ -16,7 +16,7 @@ Usage:
 import os
 import random
 from PIL import Image
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, random_split
 from torchvision import transforms
 
 
@@ -75,7 +75,7 @@ class DatasetLoader:
         self.input_path = input_path
         self.output_path = ground_truth_path
 
-    def load_data(self, batch_size: int):
+    def load_data(self, batch_size: int, validation_set_size_ratio: float = 0.1):
         """
         Load the dataset and create a data loader.
 
@@ -96,10 +96,18 @@ class DatasetLoader:
         input_data = ImageLoaderDataset(
             self.input_path, self.output_path, transform=transformator)
 
-        train_loader = DataLoader(input_data, batch_size=batch_size,
-                                  shuffle=True, pin_memory=True, num_workers=4)
+        dataset_size = len(input_data)
+        val_size = int(validation_set_size_ratio * dataset_size)
+        train_size = dataset_size - val_size
 
-        return train_loader
+        train_set, val_set = random_split(input_data, [train_size, val_size])
+
+        train_loader = DataLoader(train_set, batch_size=batch_size,
+                                  shuffle=True, pin_memory=True, num_workers=4)
+        val_loader = DataLoader(val_set, batch_size=batch_size,
+                                shuffle=False, pin_memory=True, num_workers=4)
+
+        return train_loader, val_loader
 
     def get_random_images(self, amount: int):
         """

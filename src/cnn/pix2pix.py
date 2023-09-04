@@ -1,6 +1,7 @@
 """
 This module provides classes and methods for training and 
 evaluating image translation models using PyTorch and WANDB.
+However, it also uses ResNet for more stable and faster learning.
 
 Classes:
     - ImageLoaderDataset: A PyTorch dataset for loading pairs of 
@@ -47,7 +48,7 @@ class CNN:
             nn.init.constant_(model.weight, 1)
             nn.init.constant_(model.bias, 0)
 
-    def __train(self, dir_for_models: str, train_set: DataLoader,
+    def __train(self, dir_for_models: str, train_set: DataLoader, val_set: DataLoader,
                 learning_rate: float, num_of_epochs: int = -1, finetune_from_epoch: int = -1):
         models_path = os.path.join('..', 'models', dir_for_models)
 
@@ -75,7 +76,7 @@ class CNN:
 
         # Schedulers
         scheduler_g = ReduceLROnPlateau(
-            optimizer_g, 'min', cooldown=5, patience=20, factor=0.5, threshold=0.001)
+            optimizer_g, 'min', cooldown=20, patience=30, factor=0.5, threshold=0.001)
 
         # Losses
         criterion = nn.BCELoss()
@@ -92,7 +93,10 @@ class CNN:
 
             total_batches = 0
 
-            # Training loop
+            # Training
+            generator.train()
+            discriminator.train()
+
             for (input_batch, output_batch) in tqdm(
                     train_set,
                     unit="batch",
@@ -151,7 +155,35 @@ class CNN:
 
                 total_batches += 1
 
-            # Log metrics
+            # Validating
+            generator.eval()
+            discriminator.eval()
+
+            val_loss = 0.0
+            total_val_batches = 0
+
+            for (input_batch, output_batch) in tqdm(
+                val_set,
+                unit="batch",
+                desc=f'validating epoch {epoch}'):
+
+                input_batch = input_batch.cuda()
+                output_batch = output_batch.cuda()
+
+                # Generator
+                gan_batch = generator(input_batch)
+
+                gan_data = torch.cat([input_batch, gan_batch], dim=1)
+                prediction = discriminator(gan_data)
+                labels = torch.ones(
+                    size=prediction.shape, dtype=torch.float).cuda()
+                gan_loss = criterion(
+                    prediction, labels) + l1_lambda * torch.abs(gan_batch - output_batch).mean()
+                val_loss += gan_loss
+
+                total_val_batches += 1
+
+            # Log train metrics
             avg_real_loss = total_real_loss / total_batches
             avg_fake_loss = total_fake_loss / total_batches
             avg_dicriminator_loss = (
@@ -160,11 +192,15 @@ class CNN:
             avg_loss = (avg_gan_loss +
                         avg_dicriminator_loss) / 2
 
+            # Log validation metrics
+            avg_val_loss = val_loss / total_val_batches
+
             wandb.log({"Discriminator real images loss": avg_real_loss,
                        "Discriminator fake images loss": avg_fake_loss,
                        "Discriminator loss": avg_dicriminator_loss,
                        "GAN loss": avg_gan_loss,
-                       "Loss": avg_loss})
+                       "Loss": avg_loss,
+                       "Validation GAN loss": avg_val_loss})
 
             # Update scheduler
             scheduler_g.step(avg_gan_loss)
@@ -199,7 +235,7 @@ class CNN:
         """
 
         learning_rate = 0.001
-        batch_size = 16
+        batch_size = 32
         epochs = -1
 
         dimensions = self.dataloader.get_images_dimension()
@@ -226,11 +262,11 @@ class CNN:
         else:
             print("CUDA detected! Initializing...")
 
-        train_set = self.dataloader.load_data(batch_size)
+        train_set, val_set = self.dataloader.load_data(batch_size)
 
         # simulate training
         self.__train(f'{dimensions}_b{batch_size}',
-                     train_set, learning_rate,
+                     train_set, val_set, learning_rate,
                      epochs, finetune_from_epoch)
 
         wandb.finish()
