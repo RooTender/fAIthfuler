@@ -17,7 +17,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from dataset_loader import DatasetLoader, DataLoader
 from model_tester import ModelTester
 from tqdm import tqdm
-from architectures._16x16 import pix2pix_resnet as network
+from architectures._16x16 import pix2pix_resnet_flexy as network
 import wandb
 
 
@@ -50,11 +50,11 @@ class CNN:
 
     def __train(self, dir_for_models: str, train_set: DataLoader, val_set: DataLoader,
                 learning_rate: float, num_of_epochs: int = -1, finetune_from_epoch: int = -1,
-                save_models: bool = True):
+                save_models: bool = True, layer_multiplier: int = 1, relu_factor: float = 0.2):
         models_path = os.path.join('..', 'models', dir_for_models)
 
         # Initialize Generator and Discriminator
-        generator = network.Generator().cuda()
+        generator = network.Generator(layer_multiplier, relu_factor).cuda()
         discriminator = network.Discriminator().cuda()
 
         generator.apply(self.__weights_init)
@@ -233,7 +233,9 @@ class CNN:
         self.__train(dimensions, train_set, val_set,
                      config.learning_rate,
                      config.epochs,
-                     save_models=False)
+                     save_models=False,
+                     layer_multiplier=config.layer_multiplier,
+                     relu_factor=config.leaky_relu_factor)
 
     def train(self, finetune_from_epoch: int = -1, wandb_id: str = ''):
         """
@@ -305,6 +307,12 @@ class CNN:
                 },
                 'epochs': {
                     'values': [10]
+                },
+                'layer_multiplier': {
+                    'values': [1, 2, 3, 4, 5]
+                },
+                'leaky_relu_factor': {
+                    'values': [0.1, 0.2, 0.3, 0.4, 0.5]
                 }
             }
         }
