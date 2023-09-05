@@ -31,6 +31,7 @@ class Generator(nn.Module):
 
     def __init__(self, layer_multiplier: int = 1, relu_factor: float = 0.2):
         super(Generator, self).__init__()
+        self.stored_latent_style = None
 
         # Encoder
         self.encoder1 = nn.Conv2d(
@@ -82,17 +83,38 @@ class Generator(nn.Module):
             nn.Tanh()
         )
 
-    def forward(self, content_image, style_image):
+    def forward(self, content_image, style_image=None):
+        """
+        Forward pass through the generator for style transfer.
 
-        e1_style = self.encoder1(style_image)
-        e2_style = self.encoder2(e1_style)
-        e2_style = e2_style + self.res_enc1(e2_style)
-        latent_space_style = self.encoder3(e2_style)
+        This method performs image-to-image translation by combining features 
+        from a content image and a style image. If a style image is provided, 
+        its latent style representation is computed and stored internally. 
+        If no style image is given, the previously stored latent style is used 
+        for generation.
+
+        Args:
+            content_image (torch.Tensor): The input content image tensor of shape 
+                [batch_size, channels, height, width].
+            style_image (torch.Tensor, optional): The input style image tensor of the same 
+                shape as content_image. If not provided, the method uses a stored 
+                latent style for style transfer. Default is None.
+        """
+
+        if style_image is None:
+            latent_style = self.stored_latent_style
+        else:
+            e1_style = self.encoder1(style_image)
+            e2_style = self.encoder2(e1_style)
+            e2_style = e2_style + self.res_enc1(e2_style)
+            latent_style = self.encoder3(e2_style)
+
+            self.stored_latent_style = latent_style
 
         e1_content = self.encoder1(content_image)
         e2_content = self.encoder2(e1_content)
 
-        d1 = torch.cat([self.decoder1(latent_space_style), e2_content], dim=1)
+        d1 = torch.cat([self.decoder1(latent_style), e2_content], dim=1)
         d2 = torch.cat([self.decoder2(d1), e1_content], dim=1)
         d2 = d2 + self.res_dec1(d2)
         out = self.decoder3(d2)
