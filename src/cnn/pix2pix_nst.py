@@ -17,7 +17,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from dataset_loader import DatasetLoader, DataLoader
 from model_tester import ModelTester
 from tqdm import tqdm
-from architectures._16x16 import pix2pix_resnet as network
+from architectures._16x16 import pix2pix_resnet_nst as network
 import wandb
 
 
