@@ -232,7 +232,7 @@ class CNN:
 
         self.__train(dimensions, train_set, val_set,
                      config.learning_rate,
-                     config.epochs,
+                     10,
                      save_models=False,
                      layer_multiplier=config.layer_multiplier,
                      relu_factor=config.leaky_relu_factor)
@@ -250,7 +250,7 @@ class CNN:
         """
 
         learning_rate = 0.001
-        batch_size = 32
+        batch_size = 64
         epochs = -1
 
         dimensions = self.dataloader.get_images_dimension()
@@ -282,7 +282,8 @@ class CNN:
         # simulate training
         self.__train(f'{dimensions}_b{batch_size}',
                      train_set, val_set, learning_rate,
-                     epochs, finetune_from_epoch)
+                     epochs, finetune_from_epoch,
+                     layer_multiplier=1, relu_factor=0.5)
 
         wandb.finish()
 
@@ -293,7 +294,7 @@ class CNN:
             'name': f"FaithfulNet_{dimensions}",
             'method': 'bayes',
             'metric': {
-                'name': 'GAN loss',
+                'name': 'Validation GAN loss',
                 'goal': 'minimize'   
             },
             'parameters': {
@@ -305,11 +306,8 @@ class CNN:
                 'batch_size': {
                     'values': [16, 32, 64]
                 },
-                'epochs': {
-                    'values': [10]
-                },
                 'layer_multiplier': {
-                    'values': [1, 2, 3, 4, 5]
+                    'values': [1, 2, 3, 4]
                 },
                 'leaky_relu_factor': {
                     'values': [0.1, 0.2, 0.3, 0.4, 0.5]
@@ -317,7 +315,7 @@ class CNN:
             }
         }
 
-        sweep_id = wandb.sweep(sweep_config, project="FAIthfuler", entity="rootender")
+        sweep_id = wandb.sweep(sweep_config, project="FAIthfuler", entity="rootender",)
         wandb.agent(sweep_id, function=self.__sweep_train)
 
     def test_model(self, model_path: str, images_to_test: int = 9):

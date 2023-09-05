@@ -44,7 +44,8 @@ class Generator(nn.Module):
         )
 
         # Residual connection layers for encoder
-        self.res_enc1 = nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1)
+        self.res_enc1 = nn.Conv2d(128 * layer_multiplier, 128 * layer_multiplier,
+                                  kernel_size=3, stride=1, padding=1)
 
         self.encoder3 = nn.Sequential(
             nn.LeakyReLU(relu_factor, inplace=True),
@@ -68,8 +69,11 @@ class Generator(nn.Module):
         )
 
         # Residual connection layers for decoder
-        self.res_dec1 = nn.ConvTranspose2d(64*2 * layer_multiplier, 64*2 * layer_multiplier, 
-                                           kernel_size=3, stride=1, padding=1)
+        self.res_dec1 = nn.ConvTranspose2d(
+            64*2 * layer_multiplier,
+            64*2 * layer_multiplier,
+            kernel_size=3, stride=1, padding=1
+        )
 
         self.decoder3 = nn.Sequential(
             nn.ReLU(inplace=True),

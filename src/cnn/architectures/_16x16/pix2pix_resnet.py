@@ -72,8 +72,10 @@ class Generator(nn.Module):
 
         self.decoder3 = nn.Sequential(
             nn.ReLU(inplace=True),
-            nn.ConvTranspose2d(128*2, 4, kernel_size=4,
-                               stride=2, padding=1, bias=False),
+            nn.ConvTranspose2d(
+                128*2, 4, kernel_size=4,
+                stride=2, padding=1, bias=False
+            ),
             nn.Tanh()
         )
 
