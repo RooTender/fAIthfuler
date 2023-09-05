@@ -1,6 +1,7 @@
 """
 This module defines a pair of neural network models for an image-to-image translation task.
 However, instead of being based on U-Net, it also includes ResNet.
+The 'flexy' suffix means that some settings are customizable.
 
 The module includes:
 - A Generator: Takes an input image and produces an output image.
@@ -28,54 +29,56 @@ class Generator(nn.Module):
         decoder3 (nn.Sequential): ...
     """
 
-    def __init__(self):
+    def __init__(self, layer_multiplier: int = 1, relu_factor: float = 0.2):
         super(Generator, self).__init__()
 
         # Encoder
         self.encoder1 = nn.Conv2d(
-            4, 128, kernel_size=4, stride=2, padding=1, bias=False)
+            4, 64 * layer_multiplier, kernel_size=4, stride=2, padding=1, bias=False)
 
         self.encoder2 = nn.Sequential(
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(128, 256, kernel_size=4,
-                      stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(256)
+            nn.LeakyReLU(relu_factor, inplace=True),
+            nn.Conv2d(64 * layer_multiplier, 128 * layer_multiplier,
+                      kernel_size=4, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(128 * layer_multiplier)
         )
 
         # Residual connection layers for encoder
-        self.res_enc1 = nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1)
+        self.res_enc1 = nn.Conv2d(128 * layer_multiplier, 128 * layer_multiplier,
+                                  kernel_size=3, stride=1, padding=1)
 
         self.encoder3 = nn.Sequential(
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(256, 512, kernel_size=4,
-                      stride=2, padding=1, bias=False),
+            nn.LeakyReLU(relu_factor, inplace=True),
+            nn.Conv2d(128 * layer_multiplier, 256 * layer_multiplier,
+                      kernel_size=4, stride=2, padding=1, bias=False),
         )
 
         # Decoder
         self.decoder1 = nn.Sequential(
             nn.ReLU(inplace=True),
-            nn.ConvTranspose2d(512, 256, kernel_size=4,
-                               stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(256)
+            nn.ConvTranspose2d(256 * layer_multiplier, 128 * layer_multiplier,
+                               kernel_size=4, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(128 * layer_multiplier)
         )
 
         self.decoder2 = nn.Sequential(
             nn.ReLU(inplace=True),
-            nn.ConvTranspose2d(256*2, 128, kernel_size=4,
-                               stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(128)
+            nn.ConvTranspose2d(128*2 * layer_multiplier, 64 * layer_multiplier,
+                               kernel_size=4, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(64 * layer_multiplier)
         )
 
         # Residual connection layers for decoder
         self.res_dec1 = nn.ConvTranspose2d(
-            128*2, 128*2, kernel_size=3, stride=1, padding=1)
+            64*2 * layer_multiplier,
+            64*2 * layer_multiplier,
+            kernel_size=3, stride=1, padding=1
+        )
 
         self.decoder3 = nn.Sequential(
             nn.ReLU(inplace=True),
-            nn.ConvTranspose2d(
-                128*2, 4, kernel_size=4,
-                stride=2, padding=1, bias=False
-            ),
+            nn.ConvTranspose2d(64*2 * layer_multiplier, 4,
+                               kernel_size=4, stride=2, padding=1, bias=False),
             nn.Tanh()
         )
 
@@ -89,6 +92,7 @@ class Generator(nn.Module):
         Returns:
             torch.Tensor: The output image tensor.
         """
+
         e1 = self.encoder1(image)
         e2 = self.encoder2(e1)
         e2 = e2 + self.res_enc1(e2)

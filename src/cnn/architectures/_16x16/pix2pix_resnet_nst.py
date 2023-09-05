@@ -1,7 +1,7 @@
 """
 This module defines a pair of neural network models for an image-to-image translation task.
 However, instead of being based on U-Net, it also includes ResNet.
-The 'flexy' suffix means that some settings are customizable.
+The difference from other file is that it also uses Neural Style Transfer for style learning.
 
 The module includes:
 - A Generator: Takes an input image and produces an output image.
@@ -82,24 +82,18 @@ class Generator(nn.Module):
             nn.Tanh()
         )
 
-    def forward(self, image):
-        """
-        Forward pass through the generator.
+    def forward(self, content_image, style_image):
 
-        Args:
-            image (torch.Tensor): The input image tensor.
+        e1_style = self.encoder1(style_image)
+        e2_style = self.encoder2(e1_style)
+        e2_style = e2_style + self.res_enc1(e2_style)
+        latent_space_style = self.encoder3(e2_style)
 
-        Returns:
-            torch.Tensor: The output image tensor.
-        """
+        e1_content = self.encoder1(content_image)
+        e2_content = self.encoder2(e1_content)
 
-        e1 = self.encoder1(image)
-        e2 = self.encoder2(e1)
-        e2 = e2 + self.res_enc1(e2)
-        latent_space = self.encoder3(e2)
-
-        d1 = torch.cat([self.decoder1(latent_space), e2], dim=1)
-        d2 = torch.cat([self.decoder2(d1), e1], dim=1)
+        d1 = torch.cat([self.decoder1(latent_space_style), e2_content], dim=1)
+        d2 = torch.cat([self.decoder2(d1), e1_content], dim=1)
         d2 = d2 + self.res_dec1(d2)
         out = self.decoder3(d2)
 

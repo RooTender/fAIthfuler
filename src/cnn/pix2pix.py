@@ -17,7 +17,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from dataset_loader import DatasetLoader, DataLoader
 from model_tester import ModelTester
 from tqdm import tqdm
-from architectures._16x16 import pix2pix_resnet_flexy as network
+from architectures._16x16 import pix2pix_resnet_nst as network
 import wandb
 
 
@@ -77,7 +77,7 @@ class CNN:
 
         # Schedulers
         scheduler_g = ReduceLROnPlateau(
-            optimizer_g, 'min', cooldown=20, patience=30, factor=0.5, threshold=0.001)
+            optimizer_g, 'min', patience=30, factor=0.5, threshold=0.05)
 
         # Losses
         criterion = nn.BCELoss()
@@ -116,7 +116,7 @@ class CNN:
                                     dtype=torch.float).cuda()
 
                 # slow down learning
-                real_loss = 0.25 * criterion(prediction, labels)
+                real_loss = 0.5 * criterion(prediction, labels)
                 total_real_loss += real_loss
                 real_loss.backward()
 
@@ -129,7 +129,7 @@ class CNN:
                                      dtype=torch.float).cuda()
 
                 # slow down learning
-                fake_loss = 0.25 * criterion(prediction, labels)
+                fake_loss = 0.5 * criterion(prediction, labels)
                 total_fake_loss += fake_loss
                 fake_loss.backward()
 
@@ -292,25 +292,23 @@ class CNN:
 
         sweep_config = {
             'name': f"FaithfulNet_{dimensions}",
-            'method': 'bayes',
+            'method': 'grid',
             'metric': {
                 'name': 'Validation GAN loss',
                 'goal': 'minimize'   
             },
             'parameters': {
                 'learning_rate': {
-                    'min': 0.0001,
-                    'max': 0.01,
-                    'distribution': 'uniform'
+                    'value': [0.001, 0.002]
                 },
                 'batch_size': {
-                    'values': [16, 32, 64]
+                    'values': [64]
                 },
                 'layer_multiplier': {
                     'values': [1, 2, 3, 4]
                 },
                 'leaky_relu_factor': {
-                    'values': [0.1, 0.2, 0.3, 0.4, 0.5]
+                    'values': [0.3, 0.4, 0.5]
                 }
             }
         }
