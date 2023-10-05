@@ -4,7 +4,8 @@
 		"**/data/*.png": true
 	},
 	"files.watcherExclude": {
-		"**/data/output/augmented/**": true
+		"**/data/output/augmented/**": true,
+		"**/models/**": true
 	},
 	"workbench.localHistory.exclude": {
 		"**/data/output/augmented": true
