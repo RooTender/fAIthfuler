@@ -36,16 +36,15 @@ class Generator(nn.Module):
         self.encoder1 = nn.Conv2d(
             4, 64 * layer_multiplier, kernel_size=4, stride=2, padding=1, bias=False)
 
-        self.encoder2 = nn.Sequential(
-            nn.LeakyReLU(relu_factor, inplace=True),
-            nn.Conv2d(64 * layer_multiplier, 128 * layer_multiplier,
-                      kernel_size=4, stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(128 * layer_multiplier)
-        )
+        # == Residual block ==
+        self.encoder2_leaky = nn.LeakyReLU(relu_factor, inplace=True)
+        self.encoder2_conv = nn.Conv2d(64 * layer_multiplier, 128 * layer_multiplier,
+                                       kernel_size=4, stride=2, padding=1, bias=False)
+        self.encoder2_norm = nn.BatchNorm2d(128 * layer_multiplier)
 
-        # Residual connection layers for encoder
         self.res_enc1 = nn.Conv2d(128 * layer_multiplier, 128 * layer_multiplier,
                                   kernel_size=3, stride=1, padding=1)
+        # ====================
 
         self.encoder3 = nn.Sequential(
             nn.LeakyReLU(relu_factor, inplace=True),
@@ -58,22 +57,22 @@ class Generator(nn.Module):
             nn.ReLU(inplace=True),
             nn.ConvTranspose2d(256 * layer_multiplier, 128 * layer_multiplier,
                                kernel_size=4, stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(128 * layer_multiplier)
+            nn.BatchNorm2d(128 * layer_multiplier),
+            nn.Dropout(0.5)
         )
 
-        self.decoder2 = nn.Sequential(
-            nn.ReLU(inplace=True),
-            nn.ConvTranspose2d(128*2 * layer_multiplier, 64 * layer_multiplier,
-                               kernel_size=4, stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(64 * layer_multiplier)
-        )
+        # == Residual block ==
+        self.decoder2_relu = nn.ReLU(inplace=True)
+        self.decoder2_conv = nn.Conv2d(128*2 * layer_multiplier, 64 * layer_multiplier,
+                                       kernel_size=4, stride=2, padding=1, bias=False)
+        self.decoder2_norm = nn.BatchNorm2d(64 * layer_multiplier)
 
-        # Residual connection layers for decoder
         self.res_dec1 = nn.ConvTranspose2d(
             64*2 * layer_multiplier,
             64*2 * layer_multiplier,
             kernel_size=3, stride=1, padding=1
         )
+        # ====================
 
         self.decoder3 = nn.Sequential(
             nn.ReLU(inplace=True),
@@ -94,13 +93,24 @@ class Generator(nn.Module):
         """
 
         e1 = self.encoder1(image)
-        e2 = self.encoder2(e1)
-        e2 = e2 + self.res_enc1(e2)
+
+        # Residual block
+        e1_activated = self.encoder2_leaky(e1)
+        e1_conv = self.encoder2_conv(e1_activated)
+        e2 = e1_conv + self.res_enc1(e1_conv)
+        e2 = self.encoder2_norm(e2)
+
         latent_space = self.encoder3(e2)
 
+
         d1 = torch.cat([self.decoder1(latent_space), e2], dim=1)
-        d2 = torch.cat([self.decoder2(d1), e1], dim=1)
-        d2 = d2 + self.res_dec1(d2)
+
+        # Residual block
+        d1_activated = self.decoder2_relu(d1)
+        d1_conv = torch.cat([self.decoder2_conv(d1_activated), e1], dim=1)
+        d2 = d1_conv + self.res_dec1(d1_conv)
+        d2 = self.decoder2_norm(d2)
+
         out = self.decoder3(d2)
 
         return out

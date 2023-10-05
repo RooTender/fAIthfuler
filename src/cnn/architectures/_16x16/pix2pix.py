@@ -28,45 +28,46 @@ class Generator(nn.Module):
         decoder3 (nn.Sequential): ...
     """
 
-    def __init__(self):
+    def __init__(self, layer_multiplier: int = 1, relu_factor: float = 0.2):
         super(Generator, self).__init__()
 
         # Encoder
         self.encoder1 = nn.Conv2d(
-            4, 128, kernel_size=4, stride=2, padding=1, bias=False)
+            4, 64 * layer_multiplier, kernel_size=4, stride=2, padding=1, bias=False)
 
         self.encoder2 = nn.Sequential(
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(128, 256, kernel_size=4,
-                      stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(256)
+            nn.LeakyReLU(relu_factor, inplace=True),
+            nn.Conv2d(64 * layer_multiplier, 128 * layer_multiplier,
+                      kernel_size=4, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(128 * layer_multiplier)
         )
 
         self.encoder3 = nn.Sequential(
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(256, 512, kernel_size=4,
-                      stride=2, padding=1, bias=False),
+            nn.LeakyReLU(relu_factor, inplace=True),
+            nn.Conv2d(128 * layer_multiplier, 128 * layer_multiplier,
+                      kernel_size=4, stride=2, padding=1, bias=False),
         )
 
         # Decoder
         self.decoder1 = nn.Sequential(
             nn.ReLU(inplace=True),
-            nn.ConvTranspose2d(512, 256, kernel_size=4,
-                               stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(256)
+            nn.ConvTranspose2d(128 * layer_multiplier, 128 * layer_multiplier,
+                               kernel_size=4, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(128 * layer_multiplier),
+            nn.Dropout(0.5, inplace=True)
         )
 
         self.decoder2 = nn.Sequential(
             nn.ReLU(inplace=True),
-            nn.ConvTranspose2d(256*2, 128, kernel_size=4,
-                               stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(128)
+            nn.ConvTranspose2d(128*2 * layer_multiplier, 64 * layer_multiplier,
+                               kernel_size=4, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(64 * layer_multiplier)
         )
 
         self.decoder3 = nn.Sequential(
             nn.ReLU(inplace=True),
-            nn.ConvTranspose2d(128*2, 4, kernel_size=4,
-                               stride=2, padding=1, bias=False),
+            nn.ConvTranspose2d(64*2 * layer_multiplier, 4,
+                               kernel_size=4, stride=2, padding=1, bias=False),
             nn.Tanh()
         )
 

@@ -16,7 +16,7 @@ Usage:
 import os
 import random
 from PIL import Image
-from torch.utils.data import Dataset, DataLoader, random_split
+from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 
 
@@ -75,7 +75,7 @@ class DatasetLoader:
         self.input_path = input_path
         self.output_path = ground_truth_path
 
-    def load_data(self, batch_size: int, validation_set_size_ratio: float = 0.1):
+    def load_data(self, batch_size: int):
         """
         Load the dataset and create a data loader.
 
@@ -93,18 +93,19 @@ class DatasetLoader:
             transforms.ToTensor()  # Convert images to tensors
         ])
 
-        input_data = ImageLoaderDataset(
-            self.input_path, self.output_path, transform=transformator)
+        train_data = ImageLoaderDataset(
+            os.path.join(self.input_path, 'train'),
+            os.path.join(self.output_path, 'train'),
+            transform=transformator)
 
-        dataset_size = len(input_data)
-        val_size = int(validation_set_size_ratio * dataset_size)
-        train_size = dataset_size - val_size
+        valid_data = ImageLoaderDataset(
+            os.path.join(self.input_path, 'valid'),
+            os.path.join(self.output_path, 'valid'),
+            transform=transformator)
 
-        train_set, val_set = random_split(input_data, [train_size, val_size])
-
-        train_loader = DataLoader(train_set, batch_size=batch_size,
+        train_loader = DataLoader(train_data, batch_size=batch_size,
                                   shuffle=True, pin_memory=True, num_workers=4)
-        val_loader = DataLoader(val_set, batch_size=batch_size,
+        val_loader = DataLoader(valid_data, batch_size=batch_size,
                                 shuffle=False, pin_memory=True, num_workers=4)
 
         return train_loader, val_loader
@@ -120,11 +121,11 @@ class DatasetLoader:
             list: List of tuples containing random input and ground truth image file paths.
         """
 
-        basenames = random.sample(os.listdir(self.input_path), amount)
+        basenames = random.sample(os.listdir(os.path.join(self.input_path, 'valid')), amount)
         return [
             (
-                os.path.join(self.input_path, basenames[i]),
-                os.path.join(self.output_path, basenames[i])
+                os.path.join(self.input_path, 'valid', basenames[i]),
+                os.path.join(self.output_path, 'valid', basenames[i])
             )
             for i in range(amount)
         ]

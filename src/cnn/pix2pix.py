@@ -14,10 +14,10 @@ import sys
 import torch
 from torch import nn, optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from dataset_loader import DatasetLoader, DataLoader
+from dataset_loader import DatasetLoader, DataLoader # pylint: disable=import-error
 from model_tester import ModelTester
 from tqdm import tqdm
-from architectures._16x16 import pix2pix_resnet as network
+from architectures._16x16 import pix2pix as network
 import wandb
 
 
@@ -77,7 +77,7 @@ class CNN:
 
         # Schedulers
         scheduler_g = ReduceLROnPlateau(
-            optimizer_g, 'min', patience=30, factor=0.5, threshold=0.05)
+            optimizer_g, 'min', cooldown=10, patience=30, factor=0.5, threshold=0.01)
 
         # Losses
         criterion = nn.BCELoss()
@@ -148,7 +148,7 @@ class CNN:
                         size=prediction.shape, dtype=torch.float).cuda()
 
                     gan_loss = criterion(
-                        prediction, labels) + l1_lambda * torch.abs(gan_batch - output_batch).mean()
+                        prediction, labels) + l1_lambda * torch.abs(gan_batch - output_batch).sum()
                     total_gan_loss += gan_loss / generator_iterations
 
                     gan_loss.backward()
@@ -179,7 +179,7 @@ class CNN:
                 labels = torch.ones(
                     size=prediction.shape, dtype=torch.float).cuda()
                 gan_loss = criterion(
-                    prediction, labels) + l1_lambda * torch.abs(gan_batch - output_batch).mean()
+                    prediction, labels) + l1_lambda * torch.abs(gan_batch - output_batch).sum()
                 val_loss += gan_loss
 
                 total_val_batches += 1
@@ -232,7 +232,7 @@ class CNN:
 
         self.__train(dimensions, train_set, val_set,
                      config.learning_rate,
-                     10,
+                     25,
                      save_models=False,
                      layer_multiplier=config.layer_multiplier,
                      relu_factor=config.leaky_relu_factor)
@@ -251,7 +251,7 @@ class CNN:
 
         learning_rate = 0.001
         batch_size = 64
-        epochs = -1
+        epochs = 100
 
         dimensions = self.dataloader.get_images_dimension()
 
@@ -299,16 +299,16 @@ class CNN:
             },
             'parameters': {
                 'learning_rate': {
-                    'values': [0.002]
+                    'values': [0.001]
                 },
                 'batch_size': {
-                    'values': [64]
+                    'values': [16, 64]
                 },
                 'layer_multiplier': {
-                    'values': [1, 2, 3, 4]
+                    'values': [1, 2]
                 },
                 'leaky_relu_factor': {
-                    'values': [0.3, 0.4, 0.5]
+                    'values': [0.1, 0.2, 0.3, 0.4, 0.5]
                 }
             }
         }
@@ -317,5 +317,6 @@ class CNN:
         wandb.agent(sweep_id, function=self.__sweep_train)
 
     def test_model(self, model_path: str, images_to_test: int = 9):
-        tester = ModelTester(network.Generator, self.dataloader)
+        model = network.Generator(1, 0.1)
+        tester = ModelTester(model, self.dataloader)
         tester.test(model_path, images_to_test)

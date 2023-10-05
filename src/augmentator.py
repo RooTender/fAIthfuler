@@ -6,6 +6,7 @@ Classes:
     - Utils: Utility class for easier usage of an augmentator.
 """
 import os
+import random
 from multiprocessing import Pool, cpu_count
 from pathlib import Path
 from typing import Callable, List
@@ -164,7 +165,7 @@ class Utils:
         for file in file_batch:
             function(file, *args)
 
-    def smart_augmentation(self, techniques: Techniques, goal: int):
+    def smart_augmentation(self, techniques: Techniques, goal: int, valid_set_ratio: float = 0.2):
         """
         Apply smart data augmentation to images using a combination
         of techniques to reach a specified goal.
@@ -175,27 +176,8 @@ class Utils:
             goal (int): The target number of augmented images to generate.
         """
 
-        def get_deepest_directories(root_dir):
-            max_depth = 0
-            deepest_dirs = []
-
-            for root, _, _ in os.walk(root_dir):
-                depth = str(root).count(os.sep) - str(root_dir).count(os.sep)
-
-                if depth > max_depth:
-                    max_depth = depth
-                    deepest_dirs = [os.path.abspath(root)]
-                elif depth == max_depth:
-                    deepest_dirs.append(os.path.abspath(root))
-
-            return deepest_dirs
-
         def get_files(input_path: str):
-            files = []
-            for (dirpath, _, filenames) in os.walk(input_path):
-                files += [os.path.join(dirpath, file)
-                          for file in filenames]
-            return files
+            return [os.path.join(input_path, file) for file in os.listdir(input_path)]
 
         def apply_method(function: Callable, files: List[str], *args):
             batch_size = max(
@@ -213,45 +195,52 @@ class Utils:
                                                ) for file_batch in file_batches]):
                     pbar.update(1)
 
-        total_directories = len(
-            get_deepest_directories(techniques.input_directory))
+        def apply_augmentation(images_path: str, goal: int):
+            original_images = get_files(images_path)
 
-        for i, (input_dir, output_dir) in enumerate(zip(
-                get_deepest_directories(techniques.input_directory),
-                get_deepest_directories(techniques.output_directory))):
-            print(
-                f'Augmenting {os.path.basename(input_dir)} ({i}/{total_directories})')
-
-            files = get_files(input_dir)
-            if len(files) * 2 < goal:
-                apply_method(techniques.mirror, files)
+            if len(original_images) * 2 < goal:
+                apply_method(techniques.mirror, original_images)
             else:
-                continue
+                return
 
-            if len(get_files(output_dir)) * 2 < goal:
-                apply_method(techniques.flip, files)
+            if len(get_files(images_path)) * 2 < goal:
+                apply_method(techniques.flip, original_images)
             else:
-                continue
+                return
 
-            if len(get_files(output_dir)) * 3 < goal:
-                apply_method(techniques.rotate, files)
+            if len(get_files(images_path)) * 3 < goal:
+                apply_method(techniques.rotate, original_images)
             else:
-                continue
+                return
 
             # (x + x * (1 + 1 + 3)) * y^3 = goal
-            exponent = int(np.cbrt(goal / (6 * len(files))))
+            exponent = int(np.cbrt(goal / (6 * len(original_images))))
             array_for_jittering = list(
                 np.around(np.linspace(0.5, 2, exponent), 2))
 
-            files = get_files(output_dir)
+            files = get_files(images_path)
             if len(files) * (exponent ** 3) < goal:
                 apply_method(techniques.color_jitter, files, array_for_jittering)
             else:
-                continue
+                return
 
-            files = get_files(output_dir)
+            files = get_files(images_path)
             if len(files) * 2 < goal:
                 apply_method(techniques.invert, files)
+
+        for style_dir in os.listdir(techniques.output_directory):
+            print(f'Augmenting: {style_dir} set')
+            style_dir = os.path.join(techniques.output_directory, style_dir)
+
+            dimensions = len(os.listdir(style_dir))
+            for i, dimension in enumerate(os.listdir(style_dir)):
+                print(f'Train {dimension} ({i}/{dimensions})')
+                path = os.path.join(style_dir, dimension, 'train')
+                apply_augmentation(path, goal)
+
+                print(f'Validation {dimension} ({i}/{dimensions})')
+                path = os.path.join(style_dir, dimension, 'valid')
+                apply_augmentation(path, int(goal * valid_set_ratio))
 
     def preprocess_data(self, input_dir: str):
         """
@@ -386,7 +375,84 @@ class Utils:
                 shutil.copy(os.path.join(dirpath, file),
                             os.path.join(output_dir, file))
 
-    def prepare_data(self, output_scale_ratio: int):
+    def prepare_for_augmentation(self, validation_set_ratio: float = 0.2):
+        input_directory = os.path.join(self.output_directory, 'postprocessed')
+        output_directory = os.path.join(self.output_directory, 'augmented')
+        if os.path.exists(output_directory):
+            shutil.rmtree(output_directory)
+
+        # Get the dimensions of input
+        original_dir = os.path.join(self.output_directory, 'postprocessed', 'original')
+        original_dimensions = os.listdir(original_dir)
+        original_dimensions = sorted(original_dimensions, key=lambda x: int(x.split('x')[0]))
+
+        # Get files we want to copy
+        styles_dirs = os.listdir(input_directory)
+        styles_dirs.remove('original')
+
+        styles_with_dimensions = []
+        for style in styles_dirs:
+            style_dir = os.path.join(self.output_directory, 'postprocessed', style)
+            dimensions = os.listdir(style_dir)
+            dimensions = sorted(dimensions, key=lambda x: int(x.split('x')[0]))
+            styles_with_dimensions.append((style, dimensions))
+
+        # Create sets in original dataset
+        for dimensions in original_dimensions:
+            input_original_dir = os.path.join(input_directory, 'original', dimensions)
+            output_original_dir = os.path.join(output_directory, 'original', dimensions)
+            os.makedirs(output_original_dir)
+
+            images = os.listdir(input_original_dir)
+            valid_amount = int(len(images) * validation_set_ratio)
+
+            valid_set_path = os.path.join(output_original_dir, 'valid')
+            os.makedirs(valid_set_path)
+
+            for _ in range(valid_amount):
+                index = random.randrange(0, len(images))
+                image = images[index]
+                src_image_path = os.path.join(input_original_dir, image)
+                dst_image_path = os.path.join(valid_set_path, image)
+
+                shutil.copy(src_image_path, dst_image_path)
+                images.pop(index)
+
+            train_set_path = os.path.join(output_original_dir, 'train')
+            os.makedirs(train_set_path)
+
+            for image in images:
+                src_image_path = os.path.join(input_original_dir, image)
+                dst_image_path = os.path.join(train_set_path, image)
+                shutil.copy(src_image_path, dst_image_path)
+
+        # Create styled datasets
+        for style, dimensions in styles_with_dimensions:
+            for i, _ in enumerate(dimensions):
+                input_original_dir = os.path.join(
+                    input_directory, 'original', original_dimensions[i])
+                output_original_dir = os.path.join(
+                    output_directory, 'original', original_dimensions[i])
+
+                input_style_dir = os.path.join(input_directory, style, dimensions[i])
+                output_style_dir = os.path.join(output_directory, style, dimensions[i])
+                os.makedirs(output_style_dir)
+
+                train_images = os.listdir(os.path.join(output_original_dir, 'train'))
+                os.makedirs(os.path.join(output_style_dir, 'train'))
+                for image in train_images:
+                    src_image_path = os.path.join(input_style_dir, image)
+                    dst_image_path = os.path.join(output_style_dir, 'train', image)
+                    shutil.copy(src_image_path, dst_image_path)
+
+                valid_images = os.listdir(os.path.join(output_original_dir, 'valid'))
+                os.makedirs(os.path.join(output_style_dir, 'valid'))
+                for image in valid_images:
+                    src_image_path = os.path.join(input_style_dir, image)
+                    dst_image_path = os.path.join(output_style_dir, 'valid', image)
+                    shutil.copy(src_image_path, dst_image_path)
+
+    def prepare_data(self, output_scale_ratio: int, validation_set_ratio: float = 0.2):
         """
         Prepare data for augmentation, including preprocessing, normalization, and postprocessing.
 
@@ -438,9 +504,4 @@ class Utils:
                 self.output_directory, 'normalized', os.path.basename(os.path.normpath(directory))))
 
         print('prepare for augmentation...')
-        final_directory = os.path.join(self.output_directory, 'augmented')
-        if os.path.exists(final_directory):
-            shutil.rmtree(final_directory)
-
-        shutil.copytree(os.path.join(self.output_directory,
-                        'postprocessed'), final_directory)
+        self.prepare_for_augmentation(validation_set_ratio)
