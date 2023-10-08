@@ -4,7 +4,7 @@ import sys
 from multiprocessing import freeze_support
 from augmentator import Utils, Techniques
 sys.path.append('cnn')
-from cnn.pix2pix import CNN, DatasetLoader
+from cnn.tiny_pix2pix import CNN, DatasetLoader
 
 
 def augment_datasets(output_scale_ratio: int):
@@ -26,10 +26,10 @@ if __name__ == '__main__':
     #augment_datasets(2)
     loader = DatasetLoader(
         os.path.join("..", "data", "output",
-                     "augmented", "original", "8x8"),
+                     "augmented", "original", "16x16"),
         os.path.join("..", "data", "output",
-                     "augmented", "x32", "16x16"))
+                     "augmented", "x32", "32x32"))
 
     network = CNN(loader)
     network.train()
-    #network.test_model(os.path.join('..','models','8x8_b64','e275','generator_2.240845.pth'))
+    #network.test_model(os.path.join('..','models','16x16_b64','e19','generator_0.117144.pth'))
