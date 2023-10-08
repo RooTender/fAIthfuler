@@ -32,4 +32,4 @@ if __name__ == '__main__':
 
     network = CNN(loader)
     network.train()
-    #network.test_model(os.path.join('..','models','8x8_b64','e275','generator_2.240845.pth'))
+    #network.test_model(os.path.join('..','models','16x16_b64','e19','generator_0.117144.pth'))

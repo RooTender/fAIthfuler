@@ -13,7 +13,6 @@ import shutil
 import sys
 import torch
 from torch import nn, optim
-from torch.optim.lr_scheduler import ReduceLROnPlateau
 from dataset_loader import DatasetLoader, DataLoader # pylint: disable=import-error
 from model_tester import ModelTester
 from tqdm import tqdm
@@ -43,7 +42,7 @@ class CNN:
 
     def __train(self, dir_for_models: str, train_set: DataLoader, val_set: DataLoader,
                 learning_rate: float, num_of_epochs: int = -1, finetune_from_epoch: int = -1,
-                save_models: bool = True):
+                save_models: bool = True, generator_iterations: int = 1, l1_lambda: int = 100):
         models_path = os.path.join('..', 'models', dir_for_models)
 
         # Initialize Generator and Discriminator
@@ -60,18 +59,15 @@ class CNN:
                     discriminator.load_state_dict(torch.load(model_path))
 
         # Optimizers
-        optimizer_g = optim.SGD(
-            generator.parameters(), lr=learning_rate, momentum=0.9)
-        optimizer_d = optim.SGD(
-            discriminator.parameters(), lr=learning_rate, momentum=0.9)
-
-        # Schedulers
-        scheduler_g = ReduceLROnPlateau(
-            optimizer_g, 'min', cooldown=10, patience=30, factor=0.5, threshold=0.01)
+        optimizer_g = optim.Adam(
+            generator.parameters(), lr=learning_rate, betas=(0.5, 0.999))
+        optimizer_d = optim.Adam(
+            discriminator.parameters(), lr=learning_rate, betas=(0.5, 0.999))
 
         # Losses
-        criterion = nn.BCELoss()
-        l1_lambda = 100
+        criterion_bce = nn.BCELoss()
+        criterion_l1 = nn.L1Loss()
+        # l1_lambda = 100
 
         training_start = finetune_from_epoch + 1
         if num_of_epochs == -1:
@@ -100,12 +96,11 @@ class CNN:
                 optimizer_d.zero_grad()
 
                 # Real Images
-                #real_data = torch.cat([input_batch, output_batch], dim=1)
                 prediction = discriminator(input_batch, output_batch)
                 labels = torch.ones(size=prediction.shape,
                                     dtype=torch.float).cuda()
 
-                real_loss = criterion(prediction, labels)
+                real_loss = criterion_bce(prediction, labels)
                 total_real_loss += real_loss
                 real_loss.backward()
 
@@ -116,27 +111,30 @@ class CNN:
                 labels = torch.zeros(size=prediction.shape,
                                      dtype=torch.float).cuda()
 
-                fake_loss = criterion(prediction, labels)
+                fake_loss = criterion_bce(prediction, labels)
                 total_fake_loss += fake_loss
                 fake_loss.backward()
 
                 optimizer_d.step()
 
                 # Train Generator
-                optimizer_g.zero_grad()
+                for _ in range(generator_iterations):
+                    optimizer_g.zero_grad()
 
-                gan_batch = generator(input_batch)
+                    gan_batch = generator(input_batch)
 
-                prediction = discriminator(input_batch, gan_batch).detach()
-                labels = torch.ones(
-                    size=prediction.shape, dtype=torch.float).cuda()
+                    prediction = discriminator(input_batch, gan_batch).detach()
+                    labels = torch.ones(
+                        size=prediction.shape, dtype=torch.float).cuda()
 
-                gan_loss = criterion(
-                    prediction, labels) + l1_lambda * torch.abs(gan_batch - output_batch).mean()
-                total_gan_loss += gan_loss
+                    gan_loss = criterion_bce(prediction, labels
+                                             ) + l1_lambda * criterion_l1(gan_batch, output_batch)
+                    gan_loss.requires_grad_()
 
-                gan_loss.backward()
-                optimizer_g.step()
+                    total_gan_loss += gan_loss / generator_iterations
+
+                    gan_loss.backward()
+                    optimizer_g.step()
 
                 total_batches += 1
 
@@ -161,8 +159,10 @@ class CNN:
                 prediction = discriminator(input_batch, gan_batch)
                 labels = torch.ones(
                     size=prediction.shape, dtype=torch.float).cuda()
-                gan_loss = criterion(
-                    prediction, labels) + l1_lambda * torch.abs(gan_batch - output_batch).mean()
+                gan_loss = criterion_bce(prediction, labels
+                            ) + l1_lambda * criterion_l1(gan_batch, output_batch)
+                gan_loss.requires_grad_()
+
                 val_loss += gan_loss
 
                 total_val_batches += 1
@@ -185,13 +185,6 @@ class CNN:
                        "GAN loss": avg_gan_loss,
                        "Loss": avg_loss,
                        "Validation GAN loss": avg_val_loss})
-
-            # Update scheduler
-            scheduler_g.step(avg_gan_loss)
-
-            if optimizer_g.param_groups[0]['lr'] < learning_rate:
-                learning_rate = optimizer_g.param_groups[0]['lr']
-                print(f"Learning rate set to: {learning_rate}")
 
             if save_models and (epoch % 5 == 0 or epoch == training_start + num_of_epochs - 1):
                 path_to_save = os.path.join(models_path, f'e{epoch}')
@@ -216,7 +209,9 @@ class CNN:
         self.__train(dimensions, train_set, val_set,
                      config.learning_rate,
                      25,
-                     save_models=False)
+                     save_models=False,
+                     generator_iterations=config.generator_iterations,
+                     l1_lambda=config.l1_lambda)
 
     def train(self, finetune_from_epoch: int = -1, wandb_id: str = ''):
         """
@@ -231,7 +226,7 @@ class CNN:
         """
 
         learning_rate = 0.001
-        batch_size = 64
+        batch_size = 8
         epochs = 100
 
         dimensions = self.dataloader.get_images_dimension()
@@ -248,7 +243,7 @@ class CNN:
                 "architecture": "pix2pix",
                 "learning_rate": learning_rate,
                 "batch_size": batch_size,
-                "optimizer": "SGD"
+                "optimizer": "Adam"
             }
         )
 
@@ -263,7 +258,8 @@ class CNN:
         # simulate training
         self.__train(f'{dimensions}_b{batch_size}',
                      train_set, val_set, learning_rate,
-                     epochs, finetune_from_epoch)
+                     epochs, finetune_from_epoch,
+                     l1_lambda=2)
 
         wandb.finish()
 
@@ -282,13 +278,13 @@ class CNN:
                     'values': [0.001]
                 },
                 'batch_size': {
-                    'values': [16, 64]
+                    'values': [64]
                 },
-                'layer_multiplier': {
-                    'values': [1, 2]
+                'generator_iterations': {
+                    'values': [1, 5, 10]
                 },
-                'leaky_relu_factor': {
-                    'values': [0.1, 0.2, 0.3, 0.4, 0.5]
+                'l1_lambda': {
+                    'values': [10, 50, 100]
                 }
             }
         }
