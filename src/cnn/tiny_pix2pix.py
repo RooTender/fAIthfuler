@@ -40,6 +40,27 @@ class CNN:
         """
         self.dataloader = loader
 
+    def calculate_psnr(self, img1, img2):
+        mse = torch.mean((img1 - img2) ** 2)
+        if mse == 0:
+            return 100
+
+        return 20 * torch.log10(255.0 / torch.sqrt(mse))
+
+    def calculate_ssim(self, img1, img2, k1=0.01**2, k2=0.03**2):
+        mi_1 = torch.mean(img1)
+        mi_2 = torch.mean(img2)
+
+        sigma_x = torch.mean((img1 - mi_1) ** 2)
+        sigma_y = torch.mean((img2 - mi_2) ** 2)
+        sigma_xy = torch.mean((img1 - mi_1) * (img2 - mi_2))
+
+        ssim = ((2 * mi_1 * mi_2 + k1) * (2 * sigma_xy + k2)) / ((
+            mi_1 ** 2 + mi_2 ** 2 + k1) * (sigma_x + sigma_y + k2))
+
+        return ssim
+
+
     def __train(self, dir_for_models: str, train_set: DataLoader, val_set: DataLoader,
                 learning_rate: float, num_of_epochs: int = -1, finetune_from_epoch: int = -1,
                 save_models: bool = True, generator_iterations: int = 1, l1_lambda: int = 100):
@@ -67,7 +88,6 @@ class CNN:
         # Losses
         criterion_bce = nn.BCELoss()
         criterion_l1 = nn.L1Loss()
-        # l1_lambda = 100
 
         training_start = finetune_from_epoch + 1
         if num_of_epochs == -1:
@@ -135,8 +155,9 @@ class CNN:
                     gan_loss.backward()
                     optimizer_g.step()
 
-                total_gan_loss /= generator_iterations
                 total_batches += 1
+
+            total_gan_loss /= generator_iterations
 
             # Validating
             generator.eval()
@@ -144,6 +165,8 @@ class CNN:
 
             val_loss = 0.0
             total_val_batches = 0
+            psnr = 0.0
+            ssim = 0.0
 
             with torch.no_grad():
                 for (input_batch, output_batch) in tqdm(
@@ -163,7 +186,9 @@ class CNN:
                     gan_loss = criterion_bce(prediction, labels
                                 ) + l1_lambda * criterion_l1(gan_batch, output_batch)
 
-                    val_loss += gan_loss /  (l1_lambda + 1)
+                    val_loss += gan_loss / (l1_lambda + 1)
+                    psnr += self.calculate_psnr(gan_batch, output_batch)
+                    ssim += self.calculate_ssim(gan_batch, output_batch)
 
                     total_val_batches += 1
 
@@ -172,9 +197,13 @@ class CNN:
             avg_fake_loss = total_fake_loss / total_batches
             avg_dicriminator_loss = (
                 avg_real_loss + avg_fake_loss) / 2
+            
             avg_gan_loss = total_gan_loss / total_batches
             avg_loss = (avg_gan_loss +
                         avg_dicriminator_loss) / 2
+            
+            avg_psnr = psnr / total_batches
+            avg_ssim = ssim / total_batches
 
             # Log validation metrics
             avg_val_loss = val_loss / total_val_batches
@@ -184,7 +213,9 @@ class CNN:
                        "Discriminator loss": avg_dicriminator_loss,
                        "GAN loss": avg_gan_loss,
                        "Loss": avg_loss,
-                       "Validation GAN loss": avg_val_loss})
+                       "Validation GAN loss": avg_val_loss,
+                       "PSNR": avg_psnr,
+                       "SSIM": avg_ssim})
 
             if save_models and (epoch % 5 == 0 or epoch == training_start + num_of_epochs - 1):
                 path_to_save = os.path.join(models_path, f'e{epoch}')
@@ -289,7 +320,7 @@ class CNN:
             }
         }
 
-        sweep_id = wandb.sweep(sweep_config, project="FAIthfuler", entity="rootender",)
+        sweep_id = wandb.sweep(sweep_config, project="FAIthfuler", entity="rootender")
         wandb.agent(sweep_id, function=self.__sweep_train)
 
     def test_model(self, model_path: str, images_to_test: int = 9):
