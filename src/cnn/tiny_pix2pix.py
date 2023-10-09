@@ -135,8 +135,9 @@ class CNN:
                     gan_loss.backward()
                     optimizer_g.step()
 
-                total_gan_loss /= generator_iterations
                 total_batches += 1
+
+            total_gan_loss /= generator_iterations
 
             # Validating
             generator.eval()
@@ -163,7 +164,7 @@ class CNN:
                     gan_loss = criterion_bce(prediction, labels
                                 ) + l1_lambda * criterion_l1(gan_batch, output_batch)
 
-                    val_loss += gan_loss /  (l1_lambda + 1)
+                    val_loss += gan_loss / (l1_lambda + 1)
 
                     total_val_batches += 1
 
@@ -289,7 +290,7 @@ class CNN:
             }
         }
 
-        sweep_id = wandb.sweep(sweep_config, project="FAIthfuler", entity="rootender",)
+        sweep_id = wandb.sweep(sweep_config, project="FAIthfuler", entity="rootender")
         wandb.agent(sweep_id, function=self.__sweep_train)
 
     def test_model(self, model_path: str, images_to_test: int = 9):
