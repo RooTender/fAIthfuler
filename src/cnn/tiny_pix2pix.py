@@ -129,7 +129,6 @@ class CNN:
 
                     gan_loss = criterion_bce(prediction, labels
                                              ) + l1_lambda * criterion_l1(gan_batch, output_batch)
-                    gan_loss.requires_grad_()
 
                     total_gan_loss += gan_loss / generator_iterations
 
@@ -145,27 +144,27 @@ class CNN:
             val_loss = 0.0
             total_val_batches = 0
 
-            for (input_batch, output_batch) in tqdm(
-                val_set,
-                unit="batch",
-                desc=f'validating epoch {epoch}'):
+            with torch.no_grad():
+                for (input_batch, output_batch) in tqdm(
+                    val_set,
+                    unit="batch",
+                    desc=f'validating epoch {epoch}'):
 
-                input_batch = input_batch.cuda()
-                output_batch = output_batch.cuda()
+                    input_batch = input_batch.cuda()
+                    output_batch = output_batch.cuda()
 
-                # Generator
-                gan_batch = generator(input_batch)
+                    # Generator
+                    gan_batch = generator(input_batch)
 
-                prediction = discriminator(input_batch, gan_batch)
-                labels = torch.ones(
-                    size=prediction.shape, dtype=torch.float).cuda()
-                gan_loss = criterion_bce(prediction, labels
-                            ) + l1_lambda * criterion_l1(gan_batch, output_batch)
-                gan_loss.requires_grad_()
+                    prediction = discriminator(input_batch, gan_batch)
+                    labels = torch.ones(
+                        size=prediction.shape, dtype=torch.float).cuda()
+                    gan_loss = criterion_bce(prediction, labels
+                                ) + l1_lambda * criterion_l1(gan_batch, output_batch)
 
-                val_loss += gan_loss
+                    val_loss += gan_loss
 
-                total_val_batches += 1
+                    total_val_batches += 1
 
             # Log train metrics
             avg_real_loss = total_real_loss / total_batches
@@ -226,7 +225,7 @@ class CNN:
         """
 
         learning_rate = 0.001
-        batch_size = 8
+        batch_size = 64
         epochs = 100
 
         dimensions = self.dataloader.get_images_dimension()
