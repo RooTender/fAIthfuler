@@ -16,7 +16,7 @@ def augment_datasets(output_scale_ratio: int):
         os.path.join("..", "data", "output", "augmented"))
 
     utils.prepare_data(output_scale_ratio)
-    utils.smart_augmentation(techniques, 100000)
+    utils.augment_data(techniques)
 
 
 if __name__ == '__main__':

@@ -134,13 +134,16 @@ class Techniques:
         Note: 
             1.0 means 100%, so the same value. It's about scaling: 0.75 = 75% of default, etc.
         """
-        if values_for_variations is None:
-            values = np.array([0.5, 1.5, 2])
-        else:
-            values = np.array(values_for_variations)
+        values = np.array(values_for_variations)
 
-        combinations = np.array(list(np.unique(np.array(np.meshgrid(
-            values, values, values)).T.reshape(-1, 3), axis=0)))
+        n = len(values)
+        combinations = np.array([
+            [values[i], values[j], values[k]]
+            for i in range(n)
+            for j in range(i + 1, n)
+            for k in range(j + 1, n)
+        ])
+
         for combination in combinations:
             np.vectorize(self.__jittering)(
                 image_path, combination[0], combination[1], combination[2])
@@ -160,12 +163,12 @@ class Utils:
         self.output_directory = Path(output_dir)
         os.makedirs(self.output_directory, exist_ok=True)
 
-    def _batch_process(self, data: tuple[Callable, List[str], tuple]) -> None:
+    def _batch_process(self, data) -> None:
         function, file_batch, *args = data
         for file in file_batch:
             function(file, *args)
 
-    def smart_augmentation(self, techniques: Techniques, goal: int, valid_set_ratio: float = 0.2):
+    def augment_data(self, techniques: Techniques):
         """
         Apply smart data augmentation to images using a combination
         of techniques to reach a specified goal.
@@ -186,47 +189,23 @@ class Utils:
             file_batches = [files[i:i + batch_size]
                             for i in range(0, len(files), batch_size)]
 
+            args_list = [(function, file_batch, *args) for file_batch in file_batches]
+
             with Pool() as pool, tqdm(
                     total=len(file_batches),
                     desc=function.__name__,
                     unit="batch") as pbar:
-                for _ in pool.imap_unordered(self._batch_process,
-                                             [(function, file_batch, *args
-                                               ) for file_batch in file_batches]):
+                for _ in pool.imap_unordered(self._batch_process, args_list):
                     pbar.update(1)
 
-        def apply_augmentation(images_path: str, goal: int):
+        def apply_augmentation(images_path: str):
             original_images = get_files(images_path)
 
-            if len(original_images) * 2 < goal:
-                apply_method(techniques.mirror, original_images)
-            else:
-                return
-
-            if len(get_files(images_path)) * 2 < goal:
-                apply_method(techniques.flip, original_images)
-            else:
-                return
-
-            if len(get_files(images_path)) * 3 < goal:
-                apply_method(techniques.rotate, original_images)
-            else:
-                return
-
-            # (x + x * (1 + 1 + 3)) * y^3 = goal
-            exponent = int(np.cbrt(goal / (6 * len(original_images))))
-            array_for_jittering = list(
-                np.around(np.linspace(0.5, 2, exponent), 2))
-
-            files = get_files(images_path)
-            if len(files) * (exponent ** 3) < goal:
-                apply_method(techniques.color_jitter, files, array_for_jittering)
-            else:
-                return
-
-            files = get_files(images_path)
-            if len(files) * 2 < goal:
-                apply_method(techniques.invert, files)
+            apply_method(techniques.mirror, original_images)
+            apply_method(techniques.flip, original_images)
+            apply_method(techniques.rotate, original_images)
+            apply_method(techniques.color_jitter, get_files(images_path), [0.5, 1.5, 2])
+            apply_method(techniques.invert, get_files(images_path))
 
         for style_dir in os.listdir(techniques.output_directory):
             print(f'Augmenting: {style_dir} set')
@@ -236,11 +215,11 @@ class Utils:
             for i, dimension in enumerate(os.listdir(style_dir)):
                 print(f'Train {dimension} ({i}/{dimensions})')
                 path = os.path.join(style_dir, dimension, 'train')
-                apply_augmentation(path, goal)
+                apply_augmentation(path)
 
                 print(f'Validation {dimension} ({i}/{dimensions})')
                 path = os.path.join(style_dir, dimension, 'valid')
-                apply_augmentation(path, int(goal * valid_set_ratio))
+                apply_augmentation(path)
 
     def preprocess_data(self, input_dir: str):
         """
