@@ -130,11 +130,12 @@ class CNN:
                     gan_loss = criterion_bce(prediction, labels
                                              ) + l1_lambda * criterion_l1(gan_batch, output_batch)
 
-                    total_gan_loss += gan_loss / generator_iterations
+                    total_gan_loss += gan_loss / (l1_lambda + 1)
 
                     gan_loss.backward()
                     optimizer_g.step()
 
+                total_gan_loss /= generator_iterations
                 total_batches += 1
 
             # Validating
@@ -162,7 +163,7 @@ class CNN:
                     gan_loss = criterion_bce(prediction, labels
                                 ) + l1_lambda * criterion_l1(gan_batch, output_batch)
 
-                    val_loss += gan_loss
+                    val_loss += gan_loss /  (l1_lambda + 1)
 
                     total_val_batches += 1
 
