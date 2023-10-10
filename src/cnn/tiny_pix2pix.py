@@ -80,10 +80,8 @@ class CNN:
                     discriminator.load_state_dict(torch.load(model_path))
 
         # Optimizers
-        optimizer_g = optim.Adam(
-            generator.parameters(), lr=learning_rate, betas=(0.5, 0.999))
-        optimizer_d = optim.Adam(
-            discriminator.parameters(), lr=learning_rate, betas=(0.5, 0.999))
+        optimizer_g = optim.SGD(generator.parameters(), lr=learning_rate)
+        optimizer_d = optim.SGD(discriminator.parameters(), lr=learning_rate)
 
         # Losses
         criterion_bce = nn.BCELoss()
@@ -236,11 +234,10 @@ class CNN:
 
         dimensions = self.dataloader.get_images_dimension()
         train_set, val_set = self.dataloader.load_data(config.batch_size)
+        epochs = 15
 
         self.__train(dimensions, train_set, val_set,
-                     config.learning_rate,
-                     25,
-                     save_models=False,
+                     config.learning_rate, num_of_epochs=epochs, save_models=False,
                      generator_iterations=config.generator_iterations,
                      l1_lambda=config.l1_lambda)
 
@@ -274,7 +271,7 @@ class CNN:
                 "architecture": "pix2pix",
                 "learning_rate": learning_rate,
                 "batch_size": batch_size,
-                "optimizer": "Adam"
+                "optimizer": "SGD"
             }
         )
 
@@ -290,7 +287,7 @@ class CNN:
         self.__train(f'{dimensions}_b{batch_size}',
                      train_set, val_set, learning_rate,
                      epochs, finetune_from_epoch,
-                     l1_lambda=2)
+                     l1_lambda=100, generator_iterations=5)
 
         wandb.finish()
 
@@ -312,7 +309,7 @@ class CNN:
                     'values': [64]
                 },
                 'generator_iterations': {
-                    'values': [1, 5, 10]
+                    'values': [1, 2, 5]
                 },
                 'l1_lambda': {
                     'values': [10, 50, 100]
